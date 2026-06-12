@@ -4,7 +4,6 @@ compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat_v2"]
 
 [vars]
-DEFAULT_PROVIDER = "e2b"
 
 # Set secrets via: npx wrangler secret put API_TOKEN
 # Set secrets via: npx wrangler secret put E2B_API_KEY
