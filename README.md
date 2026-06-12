@@ -17,7 +17,7 @@ Most Python sandbox libraries are **server-only**. They need a full Python runti
 **edge-sandboxes** solves this with a dual architecture:
 
 1. **Python library** — clean async API, zero required dependencies
-2. **Cloudflare Worker** — same routing logic, runs at the edge in 275+ locations
+2. **Edge Worker** — one unified TypeScript worker, deploy to Cloudflare or EdgeOne
 
 Both share the same provider abstraction, circuit breaker pattern, and fallback chain logic.
 
@@ -99,48 +99,21 @@ async def main():
 asyncio.run(main())
 ```
 
-### Cloudflare Worker (Edge API)
+### Edge Worker (Cloudflare / EdgeOne)
+
+One unified worker, deploy to either platform:
 
 ```bash
-cd cf-worker
+cd edge-worker
 
-# Set secrets
+# Cloudflare Workers
 npx wrangler secret put API_TOKEN
 npx wrangler secret put E2B_API_KEY
-
-# Deploy
 npx wrangler deploy
-```
 
-### Tencent EdgeOne (Edge API)
-
-EdgeOne uses Edge Functions with standard Web Service Worker API.
-
-```bash
-# 1. Create a Pages project on EdgeOne console
-#    → https://console.cloud.tencent.com/edgeone/pages
-
-# 2. Copy edgeone-worker/src/index.ts to your project:
-#    /edge-functions/api/sandbox/[[default]].js
-
-# 3. Set environment variables in EdgeOne dashboard:
-#    EDGEONE_FUNCTION_URL = https://your-domain.edgeone.app/api/sandbox
-#    API_TOKEN = your-secret-token
-#    E2B_API_KEY = your-e2b-key
-
-# 4. Deploy via EdgeOne CLI or dashboard
-```
-
-```bash
-# Call EdgeOne endpoint (same API as CF Worker)
-curl -X POST https://your-domain.edgeone.app/api/sandbox/create \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "provider": "e2b",
-    "fallback": ["daytona"],
-    "image": "python:3.12-slim"
-  }'
+# EdgeOne — copy src/core.ts + src/edgeone.ts to your Pages project
+# /edge-functions/api/sandbox/[[default]].js
+# Set env vars in EdgeOne dashboard
 ```
 
 ```bash

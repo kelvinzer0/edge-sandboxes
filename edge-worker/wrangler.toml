@@ -1,5 +1,5 @@
 name = "edge-sandboxes"
-main = "src/index.ts"
+main = "src/cf.ts"
 compatibility_date = "2024-12-01"
 
 [vars]

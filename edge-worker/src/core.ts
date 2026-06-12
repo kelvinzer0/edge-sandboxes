@@ -1,33 +1,31 @@
 /**
- * edge-sandboxes — Tencent EdgeOne Edge Function Router
+ * edge-sandboxes — Shared core logic for edge workers.
  *
- * Same routing logic as the Cloudflare Worker, adapted for EdgeOne Pages Functions.
- * EdgeOne uses standard Web Service Worker API — Request/Response/fetch.
- *
- * Deploy:
- *   1. Create a Pages project on EdgeOne console
- *   2. Put this file in /edge-functions/api/sandbox/[[default]].js
- *   3. Set environment variables in EdgeOne dashboard
- *
- * Usage:
- *   curl -X POST https://your-domain.edgeone.app/api/sandbox/create \
- *     -H "Authorization: Bearer $TOKEN" \
- *     -d '{"provider": "e2b", "fallback": ["daytona"], "image": "python:3.12"}'
+ * Contains: types, circuit breaker, provider implementations, router,
+ * request handlers. Used by both Cloudflare and EdgeOne adapters.
  */
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface Env {
+export interface Env {
   E2B_API_KEY?: string;
   DAYTONA_API_KEY?: string;
   DAYTONA_API_URL?: string;
+  MODAL_TOKEN_ID?: string;
   HOPX_API_KEY?: string;
+  VERCEL_TOKEN?: string;
+  VERCEL_PROJECT_ID?: string;
+  VERCEL_TEAM_ID?: string;
   SPRITES_TOKEN?: string;
+  CLOUDFLARE_SANDBOX_BASE_URL?: string;
+  CLOUDFLARE_API_TOKEN?: string;
+  EDGEONE_FUNCTION_URL?: string;
+  EDGEONE_API_TOKEN?: string;
   API_TOKEN?: string;
   DEFAULT_PROVIDER?: string;
 }
 
-interface SandboxRequest {
+export interface SandboxRequest {
   provider?: string;
   fallback?: string[];
   image?: string;
@@ -36,23 +34,30 @@ interface SandboxRequest {
   timeout?: number;
 }
 
-interface SandboxInstance {
+export interface SandboxInstance {
   id: string;
   provider: string;
   state: string;
   labels?: Record<string, string>;
 }
 
-interface ExecutionResult {
+export interface ExecutionResult {
   exit_code: number;
   stdout: string;
   stderr: string;
   duration_ms?: number;
 }
 
+export interface ProviderHealth {
+  name: string;
+  healthy: boolean;
+  circuit_state: "closed" | "open" | "half_open";
+  failure_count: number;
+}
+
 // ─── Circuit Breaker ────────────────────────────────────────────────────────
 
-class CircuitBreaker {
+export class CircuitBreaker {
   state: "closed" | "open" | "half_open" = "closed";
   failureCount = 0;
   successCount = 0;
@@ -142,9 +147,8 @@ class E2BProvider extends SandboxProvider {
         timeout: req.timeout || 120,
       }),
     });
-
     if (!resp.ok) throw new Error(`E2B create failed: ${resp.status} ${await resp.text()}`);
-    const data = await resp.json() as any;
+    const data = (await resp.json()) as any;
     return { id: data.sandboxID, provider: this.name, state: "running", labels: req.labels };
   }
 
@@ -158,9 +162,8 @@ class E2BProvider extends SandboxProvider {
       },
       body: JSON.stringify({ command, timeout: timeout || 30 }),
     });
-
     if (!resp.ok) throw new Error(`E2B exec failed: ${resp.status}`);
-    const data = await resp.json() as any;
+    const data = (await resp.json()) as any;
     return {
       exit_code: data.exitCode ?? 0,
       stdout: data.stdout ?? "",
@@ -182,7 +185,7 @@ class E2BProvider extends SandboxProvider {
       headers: { "Authorization": `Bearer ${this.apiKey}` },
     });
     if (!resp.ok) return [];
-    const data = await resp.json() as any[];
+    const data = (await resp.json()) as any[];
     return data.map((s: any) => ({
       id: s.sandboxID,
       provider: this.name,
@@ -216,7 +219,7 @@ class DaytonaProvider extends SandboxProvider {
       }),
     });
     if (!resp.ok) throw new Error(`Daytona create failed: ${resp.status}`);
-    const data = await resp.json() as any;
+    const data = (await resp.json()) as any;
     return { id: data.id, provider: this.name, state: "running", labels: req.labels };
   }
 
@@ -231,7 +234,7 @@ class DaytonaProvider extends SandboxProvider {
       body: JSON.stringify({ command }),
     });
     if (!resp.ok) throw new Error(`Daytona exec failed: ${resp.status}`);
-    const data = await resp.json() as any;
+    const data = (await resp.json()) as any;
     return {
       exit_code: data.exitCode ?? 0,
       stdout: data.stdout ?? "",
@@ -253,7 +256,7 @@ class DaytonaProvider extends SandboxProvider {
       headers: { "Authorization": `Bearer ${this.apiKey}` },
     });
     if (!resp.ok) return [];
-    const data = await resp.json() as any[];
+    const data = (await resp.json()) as any[];
     return (Array.isArray(data) ? data : data.items || []).map((s: any) => ({
       id: s.id,
       provider: this.name,
@@ -265,7 +268,7 @@ class DaytonaProvider extends SandboxProvider {
 
 // ─── Router ─────────────────────────────────────────────────────────────────
 
-class SandboxRouter {
+export class SandboxRouter {
   providers: Map<string, SandboxProvider> = new Map();
   circuitBreakers: Map<string, CircuitBreaker> = new Map();
   defaultProvider?: string;
@@ -281,7 +284,6 @@ class SandboxRouter {
     if (provider) chain.push(provider);
     if (fallback) chain.push(...fallback);
     if (!chain.length && this.defaultProvider) chain.push(this.defaultProvider);
-
     return chain.filter((name) => {
       const p = this.providers.get(name);
       const cb = this.circuitBreakers.get(name);
@@ -292,7 +294,6 @@ class SandboxRouter {
   async createSandbox(req: SandboxRequest): Promise<SandboxInstance & { _provider: string }> {
     const chain = this.resolveChain(req.provider, req.fallback);
     if (!chain.length) throw new Error("No healthy providers available");
-
     let lastError: Error | null = null;
     for (const name of chain) {
       const provider = this.providers.get(name)!;
@@ -321,7 +322,7 @@ class SandboxRouter {
     return p.destroySandbox(sandboxId);
   }
 
-  getHealthStatus(): any[] {
+  getHealthStatus(): ProviderHealth[] {
     return Array.from(this.providers.entries()).map(([name]) => {
       const cb = this.circuitBreakers.get(name)!;
       return {
@@ -334,9 +335,9 @@ class SandboxRouter {
   }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Factory ────────────────────────────────────────────────────────────────
 
-function createRouter(env: Env): SandboxRouter {
+export function createRouter(env: Env): SandboxRouter {
   const router = new SandboxRouter();
   if (env.E2B_API_KEY) router.registerProvider("e2b", new E2BProvider(env.E2B_API_KEY));
   if (env.DAYTONA_API_KEY) router.registerProvider("daytona", new DaytonaProvider(env.DAYTONA_API_KEY, env.DAYTONA_API_URL));
@@ -344,13 +345,15 @@ function createRouter(env: Env): SandboxRouter {
   return router;
 }
 
-function checkAuth(request: Request, env: Env): boolean {
+// ─── Request Handler ────────────────────────────────────────────────────────
+
+export function checkAuth(request: Request, env: Env): boolean {
   if (!env.API_TOKEN) return true;
   const auth = request.headers.get("Authorization");
   return auth === `Bearer ${env.API_TOKEN}`;
 }
 
-function jsonResponse(data: any, status = 200): Response {
+export function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -362,44 +365,37 @@ function jsonResponse(data: any, status = 200): Response {
   });
 }
 
-// ─── EdgeOne Handler ────────────────────────────────────────────────────────
-//
-// EdgeOne Pages Functions uses onRequest(context) pattern.
-// Route: /edge-functions/api/sandbox/[[default]].js
-// This catches all paths under /api/sandbox/*
-//
+export function corsResponse(): Response {
+  return new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    },
+  });
+}
 
-export async function onRequest(context: any): Promise<Response> {
-  const { request, env } = context;
-
-  // CORS preflight
-  if (request.method === "OPTIONS") {
-    return new Response(null, {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
-    });
-  }
-
-  if (!checkAuth(request, env)) {
-    return jsonResponse({ error: "Unauthorized" }, 401);
-  }
+export async function handleRequest(request: Request, env: Env): Promise<Response> {
+  if (request.method === "OPTIONS") return corsResponse();
+  if (!checkAuth(request, env)) return jsonResponse({ error: "Unauthorized" }, 401);
 
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api\/sandbox/, "") || "/";
   const router = createRouter(env);
 
   try {
-    // ── Create sandbox ───────────────────────────────────────────────
+    if (path === "/health" || path === "/") {
+      if (request.method === "GET") {
+        return jsonResponse({ status: "ok", providers: router.getHealthStatus() });
+      }
+    }
+
     if (path === "/create" && request.method === "POST") {
       const body = (await request.json()) as SandboxRequest;
       const instance = await router.createSandbox(body);
       return jsonResponse(instance, 201);
     }
 
-    // ── Execute command ──────────────────────────────────────────────
     const execMatch = path.match(/^\/([^/]+)\/exec$/);
     if (execMatch && request.method === "POST") {
       const sandboxId = execMatch[1];
@@ -408,20 +404,12 @@ export async function onRequest(context: any): Promise<Response> {
       return jsonResponse(result);
     }
 
-    // ── Destroy sandbox ──────────────────────────────────────────────
     const destroyMatch = path.match(/^\/([^/]+)$/);
     if (destroyMatch && request.method === "DELETE") {
       const sandboxId = destroyMatch[1];
       const provider = url.searchParams.get("provider") || env.DEFAULT_PROVIDER || "";
       const ok = await router.destroySandbox(provider, sandboxId);
       return jsonResponse({ destroyed: ok });
-    }
-
-    // ── Health ───────────────────────────────────────────────────────
-    if (path === "/health" || path === "/") {
-      if (request.method === "GET") {
-        return jsonResponse({ status: "ok", providers: router.getHealthStatus() });
-      }
     }
 
     return jsonResponse({ error: "Not found", path }, 404);
