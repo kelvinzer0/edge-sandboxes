@@ -46,22 +46,8 @@ export class DaytonaProvider extends SandboxProvider {
 
   async executeCommand(sandboxId: string, command: string, timeout?: number): Promise<ExecutionResult> {
     const start = Date.now();
-    let meta = this.sandboxes.get(sandboxId);
 
-    // Fetch toolboxUrl from API if not cached (stateless edge worker)
-    if (!meta?.toolboxUrl) {
-      const infoResp = await fetch(`${DAYTONA_API_BASE}/sandbox/${sandboxId}`, {
-        headers: this.headers(),
-      });
-      if (!infoResp.ok) throw new Error(`Daytona sandbox ${sandboxId} not found`);
-      const info = (await infoResp.json()) as any;
-      meta = { toolboxUrl: info.toolboxProxyUrl || "" };
-      this.sandboxes.set(sandboxId, meta);
-    }
-
-    if (!meta.toolboxUrl) throw new Error(`Daytona sandbox ${sandboxId} has no toolbox URL`);
-
-    const resp = await fetch(`${meta.toolboxUrl}/process/execute`, {
+    const resp = await fetch(`https://proxy.app.daytona.io/toolbox/${sandboxId}/process/execute`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ command }),
