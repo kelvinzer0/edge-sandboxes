@@ -7,6 +7,8 @@
  * - Auto fallback if default fails
  */
 
+export { Sandbox } from "@cloudflare/sandbox";
+
 import type { Env } from "./types";
 import { handleRequest } from "./handlers";
 

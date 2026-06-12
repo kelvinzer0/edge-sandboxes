@@ -1,10 +1,10 @@
 import type { ExecutionResult, SandboxInstance, SandboxRequest } from "../types";
 import { SandboxProvider } from "./base";
+import { getSandbox } from "@cloudflare/sandbox";
 
 /**
  * Cloudflare native sandbox provider.
- * Uses getSandbox() which is globally available in CF Workers runtime
- * when Sandbox Durable Object binding is configured.
+ * Uses @cloudflare/sandbox SDK with Durable Objects.
  */
 export class CloudflareNativeProvider extends SandboxProvider {
   name = "cloudflare";
@@ -16,9 +16,7 @@ export class CloudflareNativeProvider extends SandboxProvider {
   }
 
   private getSandbox(id: string) {
-    // getSandbox is globally available in CF Workers with Sandbox binding
-    // No import needed — it's injected by the runtime
-    return (globalThis as any).getSandbox(this.env.Sandbox, id);
+    return getSandbox(this.env.Sandbox, id);
   }
 
   async createSandbox(req: SandboxRequest): Promise<SandboxInstance> {
