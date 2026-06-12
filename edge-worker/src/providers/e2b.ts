@@ -75,45 +75,78 @@ export class E2BProvider extends SandboxProvider {
       }),
     });
 
-    if (!resp.ok) throw new Error(`E2B exec failed: ${resp.status}`);
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`E2B exec failed: ${resp.status} ${errText}`);
+    }
 
-    const text = await resp.text();
-
-    // Connect protocol streaming: messages separated by \r\n
-    const messages = text.split(/\r\n/).filter(Boolean);
-
+    // Read streaming response properly
+    const reader = resp.body?.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
     let exitCode = 0;
     let stdout = "";
     let stderr = "";
-    let error = "";
+    let errorMsg = "";
 
-    for (const msg of messages) {
-      try {
-        const parsed = JSON.parse(msg);
-        const event = parsed.event;
-        if (!event) continue;
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-        if (event.start) {
-          // Process started
-        } else if (event.data) {
-          if (event.data.stdout) stdout += atob(event.data.stdout);
-          if (event.data.stderr) stderr += atob(event.data.stderr);
-          if (event.data.pty) stdout += atob(event.data.pty);
-        } else if (event.end) {
-          const status = event.end.status || "";
-          const exitMatch = status.match(/exit status (\d+)/);
-          exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
-          error = event.end.error || "";
+        // Process complete messages (separated by \r\n)
+        const parts = buffer.split(/\r\n/);
+        buffer = parts.pop() || "";
+
+        for (const part of parts) {
+          const trimmed = part.trim();
+          if (!trimmed) continue;
+          try {
+            const parsed = JSON.parse(trimmed);
+            const event = parsed.event;
+            if (!event) continue;
+
+            if (event.start) {
+              // Process started
+            } else if (event.data) {
+              if (event.data.stdout) stdout += atob(event.data.stdout);
+              if (event.data.stderr) stderr += atob(event.data.stderr);
+              if (event.data.pty) stdout += atob(event.data.pty);
+            } else if (event.end) {
+              const status = event.end.status || "";
+              const exitMatch = status.match(/exit status (\d+)/);
+              exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
+              errorMsg = event.end.error || "";
+            }
+          } catch {
+            // Skip non-JSON messages
+          }
         }
-      } catch {
-        // Skip non-JSON messages
+      }
+
+      // Process remaining buffer
+      if (buffer.trim()) {
+        try {
+          const parsed = JSON.parse(buffer.trim());
+          const event = parsed.event;
+          if (event?.data) {
+            if (event.data.stdout) stdout += atob(event.data.stdout);
+            if (event.data.stderr) stderr += atob(event.data.stderr);
+          } else if (event?.end) {
+            const status = event.end.status || "";
+            const exitMatch = status.match(/exit status (\d+)/);
+            exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
+            errorMsg = event.end.error || "";
+          }
+        } catch {}
       }
     }
 
     return {
       exit_code: exitCode,
       stdout,
-      stderr: stderr || error,
+      stderr: stderr || errorMsg,
       duration_ms: Date.now() - start,
     };
   }

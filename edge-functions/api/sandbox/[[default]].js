@@ -186,27 +186,53 @@ class E2BProvider {
     });
     if (!resp.ok) throw new Error(`E2B exec failed: ${resp.status}`);
 
-    const text = await resp.text();
-    const messages = text.split(/\r\n/).filter(Boolean);
-
+    const reader = resp.body?.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
     let exitCode = 0, stdout = "", stderr = "", error = "";
 
-    for (const msg of messages) {
-      try {
-        const parsed = JSON.parse(msg);
-        const event = parsed.event;
-        if (!event) continue;
-        if (event.data) {
-          if (event.data.stdout) stdout += atob(event.data.stdout);
-          if (event.data.stderr) stderr += atob(event.data.stderr);
-          if (event.data.pty) stdout += atob(event.data.pty);
-        } else if (event.end) {
-          const status = event.end.status || "";
-          const exitMatch = status.match(/exit status (\d+)/);
-          exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
-          error = event.end.error || "";
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split(/\r\n/);
+        buffer = parts.pop() || "";
+        for (const part of parts) {
+          const trimmed = part.trim();
+          if (!trimmed) continue;
+          try {
+            const parsed = JSON.parse(trimmed);
+            const event = parsed.event;
+            if (!event) continue;
+            if (event.data) {
+              if (event.data.stdout) stdout += atob(event.data.stdout);
+              if (event.data.stderr) stderr += atob(event.data.stderr);
+              if (event.data.pty) stdout += atob(event.data.pty);
+            } else if (event.end) {
+              const status = event.end.status || "";
+              const exitMatch = status.match(/exit status (\d+)/);
+              exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
+              error = event.end.error || "";
+            }
+          } catch {}
         }
-      } catch {}
+      }
+      if (buffer.trim()) {
+        try {
+          const parsed = JSON.parse(buffer.trim());
+          const event = parsed.event;
+          if (event?.data) {
+            if (event.data.stdout) stdout += atob(event.data.stdout);
+            if (event.data.stderr) stderr += atob(event.data.stderr);
+          } else if (event?.end) {
+            const status = event.end.status || "";
+            const exitMatch = status.match(/exit status (\d+)/);
+            exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
+            error = event.end.error || "";
+          }
+        } catch {}
+      }
     }
     return { exit_code: exitCode, stdout, stderr: stderr || error, duration_ms: Date.now() - start };
   }
