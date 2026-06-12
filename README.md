@@ -21,7 +21,7 @@ Most sandbox libraries are **provider-specific**. You need a different SDK for E
 |----------|------|------------|--------|
 | [E2B](https://e2b.dev/docs) | [API Reference](https://e2b.mintlify.app/docs/api-reference/sandboxes/create-sandbox) | `E2B_API_KEY` | ✅ |
 | [Daytona](https://daytona.io/docs) | [API Reference](https://www.daytona.io/docs/en/tools/api) | `DAYTONA_API_KEY` | ✅ |
-| [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/get-started/) | [API Reference](https://developers.cloudflare.com/api/resources/sandbox/) | `CLOUDFLARE_SANDBOX_BASE_URL` + `CLOUDFLARE_API_TOKEN` | ✅ |
+| [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) | [Get Started](https://developers.cloudflare.com/sandbox/get-started/) | `CLOUDFLARE_SANDBOX_BASE_URL` + `CLOUDFLARE_API_TOKEN` | ✅ |
 | [EdgeOne](https://www.edgeone.com/) | [Edge Functions](https://www.edgeone.com/document/detail/edgeone/pages) | `EDGEONE_FUNCTION_URL` | ✅ |
 
 ## Architecture
@@ -336,7 +336,7 @@ func main() {
 | EdgeOne | ✅ |
 | [E2B provider](https://e2b.dev/docs) | ✅ |
 | [Daytona provider](https://daytona.io/docs) | ✅ |
-| [Cloudflare Sandbox provider](https://developers.cloudflare.com/sandbox/get-started/) | ✅ |
+| [Cloudflare Sandbox provider](https://developers.cloudflare.com/sandbox/) | ✅ |
 | EdgeOne provider | ✅ |
 | Fallback chains | ✅ |
 | Circuit breakers | ✅ |
