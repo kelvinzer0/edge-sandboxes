@@ -3,22 +3,17 @@ import { SandboxProvider } from "./base";
 
 export class EdgeOneProvider extends SandboxProvider {
   name = "edgeone";
-  private functionUrl: string;
-  private apiToken: string;
+  private workerUrl: string;
 
-  constructor(functionUrl: string, apiToken?: string) {
+  constructor(workerUrl: string) {
     super();
-    this.functionUrl = functionUrl;
-    this.apiToken = apiToken || "";
+    this.workerUrl = workerUrl.replace(/\/$/, "");
   }
 
   async createSandbox(req: SandboxRequest): Promise<SandboxInstance> {
-    const resp = await fetch(`${this.functionUrl}/create`, {
+    const resp = await fetch(`${this.workerUrl}/api/sandbox/create`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(this.apiToken ? { "Authorization": `Bearer ${this.apiToken}` } : {}),
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         provider: req.image,
         image: req.image,
@@ -27,22 +22,24 @@ export class EdgeOneProvider extends SandboxProvider {
         timeout: req.timeout,
       }),
     });
-    if (!resp.ok) throw new Error(`EdgeOne create failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`EdgeOne create failed: ${resp.status} ${await resp.text()}`);
     const data = (await resp.json()) as any;
-    return { id: data.id, provider: `edgeone/${data._provider || "unknown"}`, state: "running", labels: req.labels };
+    return {
+      id: data.id || "",
+      provider: `edgeone/${data._provider || "unknown"}`,
+      state: "running",
+      labels: req.labels,
+    };
   }
 
   async executeCommand(sandboxId: string, command: string, timeout?: number): Promise<ExecutionResult> {
     const start = Date.now();
-    const resp = await fetch(`${this.functionUrl}/${sandboxId}/exec`, {
+    const resp = await fetch(`${this.workerUrl}/api/sandbox/${sandboxId}/exec`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(this.apiToken ? { "Authorization": `Bearer ${this.apiToken}` } : {}),
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ command, timeout }),
     });
-    if (!resp.ok) throw new Error(`EdgeOne exec failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`EdgeOne exec failed: ${resp.status} ${await resp.text()}`);
     const data = (await resp.json()) as any;
     return {
       exit_code: data.exit_code ?? 0,
@@ -53,9 +50,8 @@ export class EdgeOneProvider extends SandboxProvider {
   }
 
   async destroySandbox(sandboxId: string): Promise<boolean> {
-    const resp = await fetch(`${this.functionUrl}/${sandboxId}`, {
+    const resp = await fetch(`${this.workerUrl}/api/sandbox/${sandboxId}`, {
       method: "DELETE",
-      headers: this.apiToken ? { "Authorization": `Bearer ${this.apiToken}` } : {},
     });
     return resp.ok;
   }

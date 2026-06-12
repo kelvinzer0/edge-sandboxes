@@ -17,12 +17,12 @@ Most sandbox libraries are **provider-specific**. You need a different SDK for E
 
 ## Supported Providers
 
-| Provider | Docs | Env Var(s) | Status |
-|----------|------|------------|--------|
-| [E2B](https://e2b.dev/docs) | [API Reference](https://e2b.mintlify.app/docs/api-reference/sandboxes/create-sandbox) | `E2B_API_KEY` | ✅ |
-| [Daytona](https://daytona.io/docs) | [API Reference](https://www.daytona.io/docs/en/tools/api) | `DAYTONA_API_KEY` | ✅ |
-| [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) | [Get Started](https://developers.cloudflare.com/sandbox/get-started/) | `CLOUDFLARE_SANDBOX_BASE_URL` + `CLOUDFLARE_API_TOKEN` | ✅ |
-| [EdgeOne](https://www.edgeone.com/) | [Edge Functions](https://www.edgeone.com/document/detail/edgeone/pages) | `EDGEONE_FUNCTION_URL` | ✅ |
+| Provider | Type | Env Var | Docs |
+|----------|------|---------|------|
+| [E2B](https://e2b.dev/docs) | API Key | `E2B_API_KEY` | [API Reference](https://e2b.mintlify.app/docs/api-reference/sandboxes/create-sandbox) |
+| [Daytona](https://daytona.io/docs) | API Key | `DAYTONA_API_KEY` | [API Reference](https://www.daytona.io/docs/en/tools/api) |
+| [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) | Worker URL | `CLOUDFLARE_WORKER_URL` | [Get Started](https://developers.cloudflare.com/sandbox/get-started/) |
+| EdgeOne | Worker URL | `EDGEONE_WORKER_URL` | [Edge Functions](https://www.edgeone.com/document/detail/edgeone/pages) |
 
 ## Architecture
 

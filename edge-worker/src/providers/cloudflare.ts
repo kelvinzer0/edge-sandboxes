@@ -3,70 +3,67 @@ import { SandboxProvider } from "./base";
 
 export class CloudflareSandboxProvider extends SandboxProvider {
   name = "cloudflare";
-  private baseUrl: string;
-  private apiToken: string;
+  private workerUrl: string;
 
-  constructor(baseUrl: string, apiToken: string) {
+  constructor(workerUrl: string) {
     super();
-    this.baseUrl = baseUrl;
-    this.apiToken = apiToken;
+    this.workerUrl = workerUrl.replace(/\/$/, "");
   }
 
   async createSandbox(req: SandboxRequest): Promise<SandboxInstance> {
-    const resp = await fetch(`${this.baseUrl}/api/session/create`, {
+    const resp = await fetch(`${this.workerUrl}/create`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${this.apiToken}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        image: req.image,
         env: req.env_vars || {},
-        cwd: "/workspace",
-        isolation: true,
+        labels: req.labels || {},
+        timeout: req.timeout,
       }),
     });
-    if (!resp.ok) throw new Error(`Cloudflare create failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`Cloudflare create failed: ${resp.status} ${await resp.text()}`);
     const data = (await resp.json()) as any;
-    return { id: data.id || data.sessionId, provider: this.name, state: "running", labels: req.labels };
+    return {
+      id: data.id || data.sandboxId || "",
+      provider: this.name,
+      state: "running",
+      labels: req.labels,
+    };
   }
 
   async executeCommand(sandboxId: string, command: string, timeout?: number): Promise<ExecutionResult> {
     const start = Date.now();
-    const resp = await fetch(`${this.baseUrl}/api/execute`, {
+    const resp = await fetch(`${this.workerUrl}/run`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${this.apiToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ id: sandboxId, command }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sandboxId, command, timeout }),
     });
-    if (!resp.ok) throw new Error(`Cloudflare exec failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`Cloudflare exec failed: ${resp.status} ${await resp.text()}`);
     const data = (await resp.json()) as any;
     return {
       exit_code: data.exitCode ?? data.exit_code ?? 0,
-      stdout: data.stdout ?? "",
-      stderr: data.stderr ?? "",
+      stdout: data.stdout ?? data.output ?? "",
+      stderr: data.stderr ?? data.error ?? "",
       duration_ms: Date.now() - start,
     };
   }
 
   async destroySandbox(sandboxId: string): Promise<boolean> {
-    const resp = await fetch(`${this.baseUrl}/api/process/kill-all?session=${sandboxId}`, {
-      method: "DELETE",
-      headers: { "Authorization": `Bearer ${this.apiToken}` },
+    const resp = await fetch(`${this.workerUrl}/destroy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sandboxId }),
     });
     return resp.ok;
   }
 
   async listSandboxes(): Promise<SandboxInstance[]> {
-    const resp = await fetch(`${this.baseUrl}/api/session/list`, {
-      headers: { "Authorization": `Bearer ${this.apiToken}` },
-    });
+    const resp = await fetch(`${this.workerUrl}/list`);
     if (!resp.ok) return [];
     const data = (await resp.json()) as any;
-    const sessions = data.sessions || [];
-    return sessions.map((id: string) => ({
-      id,
+    const items = data.sandboxes || data || [];
+    return items.map((s: any) => ({
+      id: s.id || s.sandboxId,
       provider: this.name,
       state: "running",
     }));

@@ -4,9 +4,11 @@
  * Single bundled file for EdgeOne Pages Functions.
  * Route: /edge-functions/api/sandbox/[[default]].js
  *
- * Supports multiple API keys per provider with round-robin:
+ * Env vars:
  *   E2B_API_KEY=key1,key2,key3
  *   DAYTONA_API_KEY=daytona-key1,daytona-key2
+ *   EDGEONE_WORKER_URL=https://another-edge-sandbox.edgeone.dev
+ *   CLOUDFLARE_WORKER_URL=https://my-cf-sandbox.workers.dev
  */
 
 // ─── Circuit Breaker ────────────────────────────────────────────────────────
@@ -211,23 +213,20 @@ class E2BProvider {
     const resp = await fetch(`https://49983-${sandboxId}.e2b.app/process.Process/Start`, {
       method: "POST",
       headers,
-      body,
+      body: body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
     });
     if (!resp.ok) throw new Error(`E2B exec failed: ${resp.status}`);
 
-    const arrayBuf = await resp.arrayBuffer();
-    const raw = new Uint8Array(arrayBuf);
+    const raw = new Uint8Array(await resp.arrayBuffer());
     const messages = decodeConnectEnvelopes(raw);
 
     let exitCode = 0, stdout = "", stderr = "", error = "";
-
     for (const msg of messages) {
       const event = msg.event;
       if (!event) continue;
       if (event.data) {
         if (event.data.stdout) stdout += atob(event.data.stdout);
         if (event.data.stderr) stderr += atob(event.data.stderr);
-        if (event.data.pty) stdout += atob(event.data.pty);
       } else if (event.end) {
         const status = event.end.status || "";
         const exitMatch = status.match(/exit status (\d+)/);
@@ -259,7 +258,6 @@ class DaytonaProvider {
   name = "daytona";
   constructor(apiKey) {
     this.apiKey = apiKey;
-    this.sandboxes = new Map();
   }
 
   headers() {
@@ -267,22 +265,18 @@ class DaytonaProvider {
   }
 
   async createSandbox(req) {
-    const snapshot = req.image || "daytona-small";
-    const body = { snapshot, env: req.env_vars || {}, labels: req.labels || {} };
     const resp = await fetch(`${DAYTONA_API_BASE}/sandbox`, {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify(body),
+      body: JSON.stringify({ snapshot: req.image || "daytona-small", env: req.env_vars || {}, labels: req.labels || {} }),
     });
     if (!resp.ok) throw new Error(`Daytona create failed: ${resp.status} ${await resp.text()}`);
     const data = await resp.json();
-    this.sandboxes.set(data.id, { toolboxUrl: data.toolboxProxyUrl || "" });
     return { id: data.id, provider: this.name, state: "running", labels: req.labels };
   }
 
   async executeCommand(sandboxId, command, timeout) {
     const start = Date.now();
-
     const resp = await fetch(`https://proxy.app.daytona.io/toolbox/${sandboxId}/process/execute`, {
       method: "POST",
       headers: this.headers(),
@@ -295,7 +289,6 @@ class DaytonaProvider {
 
   async destroySandbox(sandboxId) {
     const resp = await fetch(`${DAYTONA_API_BASE}/sandbox/${sandboxId}`, { method: "DELETE", headers: this.headers() });
-    this.sandboxes.delete(sandboxId);
     return resp.ok;
   }
 
@@ -306,6 +299,89 @@ class DaytonaProvider {
     const items = Array.isArray(data) ? data : data.items || [];
     return items.map(s => ({ id: s.id, provider: this.name, state: s.state || "running", labels: s.labels || {} }));
   }
+}
+
+// ─── Cloudflare Sandbox (HTTP proxy to deployed CF Worker) ──────────────────
+
+class CloudflareSandboxProvider {
+  name = "cloudflare";
+  constructor(workerUrl) {
+    this.workerUrl = workerUrl.replace(/\/$/, "");
+  }
+
+  async createSandbox(req) {
+    const resp = await fetch(`${this.workerUrl}/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: req.image, env: req.env_vars || {}, labels: req.labels || {}, timeout: req.timeout }),
+    });
+    if (!resp.ok) throw new Error(`Cloudflare create failed: ${resp.status} ${await resp.text()}`);
+    const data = await resp.json();
+    return { id: data.id || data.sandboxId || "", provider: this.name, state: "running", labels: req.labels };
+  }
+
+  async executeCommand(sandboxId, command, timeout) {
+    const start = Date.now();
+    const resp = await fetch(`${this.workerUrl}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sandboxId, command, timeout }),
+    });
+    if (!resp.ok) throw new Error(`Cloudflare exec failed: ${resp.status} ${await resp.text()}`);
+    const data = await resp.json();
+    return { exit_code: data.exitCode ?? data.exit_code ?? 0, stdout: data.stdout ?? data.output ?? "", stderr: data.stderr ?? data.error ?? "", duration_ms: Date.now() - start };
+  }
+
+  async destroySandbox(sandboxId) {
+    const resp = await fetch(`${this.workerUrl}/destroy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sandboxId }) });
+    return resp.ok;
+  }
+
+  async listSandboxes() {
+    const resp = await fetch(`${this.workerUrl}/list`);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return (data.sandboxes || data || []).map(s => ({ id: s.id || s.sandboxId, provider: this.name, state: "running" }));
+  }
+}
+
+// ─── EdgeOne Sandbox (HTTP proxy to another EdgeOne instance) ───────────────
+
+class EdgeOneSandboxProvider {
+  name = "edgeone";
+  constructor(workerUrl) {
+    this.workerUrl = workerUrl.replace(/\/$/, "");
+  }
+
+  async createSandbox(req) {
+    const resp = await fetch(`${this.workerUrl}/api/sandbox/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: req.image, image: req.image, labels: req.labels || {}, env_vars: req.env_vars || {}, timeout: req.timeout }),
+    });
+    if (!resp.ok) throw new Error(`EdgeOne create failed: ${resp.status} ${await resp.text()}`);
+    const data = await resp.json();
+    return { id: data.id || "", provider: `edgeone/${data._provider || "unknown"}`, state: "running", labels: req.labels };
+  }
+
+  async executeCommand(sandboxId, command, timeout) {
+    const start = Date.now();
+    const resp = await fetch(`${this.workerUrl}/api/sandbox/${sandboxId}/exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, timeout }),
+    });
+    if (!resp.ok) throw new Error(`EdgeOne exec failed: ${resp.status} ${await resp.text()}`);
+    const data = await resp.json();
+    return { exit_code: data.exit_code ?? 0, stdout: data.stdout ?? "", stderr: data.stderr ?? "", duration_ms: data.duration_ms ?? Date.now() - start };
+  }
+
+  async destroySandbox(sandboxId) {
+    const resp = await fetch(`${this.workerUrl}/api/sandbox/${sandboxId}`, { method: "DELETE" });
+    return resp.ok;
+  }
+
+  async listSandboxes() { return []; }
 }
 
 // ─── Router ─────────────────────────────────────────────────────────────────
@@ -386,6 +462,7 @@ class SandboxRouter {
 function createRouter(env) {
   const router = new SandboxRouter();
 
+  // Direct providers (API keys)
   if (env.E2B_API_KEY) {
     const keys = splitKeys(env.E2B_API_KEY);
     const provider = keys.length > 1
@@ -397,9 +474,18 @@ function createRouter(env) {
   if (env.DAYTONA_API_KEY) {
     const keys = splitKeys(env.DAYTONA_API_KEY);
     const provider = keys.length > 1
-      ? new MultiAccountProvider("daytona", keys.map(k => new DaytonaProvider(k, env.DAYTONA_API_URL)))
-      : new DaytonaProvider(keys[0], env.DAYTONA_API_URL);
+      ? new MultiAccountProvider("daytona", keys.map(k => new DaytonaProvider(k)))
+      : new DaytonaProvider(keys[0]);
     router.registerProvider("daytona", provider);
+  }
+
+  // URL-based providers (deployed workers)
+  if (env.EDGEONE_WORKER_URL) {
+    router.registerProvider("edgeone", new EdgeOneSandboxProvider(env.EDGEONE_WORKER_URL));
+  }
+
+  if (env.CLOUDFLARE_WORKER_URL) {
+    router.registerProvider("cloudflare", new CloudflareSandboxProvider(env.CLOUDFLARE_WORKER_URL));
   }
 
   if (env.DEFAULT_PROVIDER) router.defaultProvider = env.DEFAULT_PROVIDER;

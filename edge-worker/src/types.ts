@@ -1,16 +1,8 @@
 export interface Env {
   E2B_API_KEY?: string;
   DAYTONA_API_KEY?: string;
-  DAYTONA_API_URL?: string;
-  HOPX_API_KEY?: string;
-  VERCEL_TOKEN?: string;
-  VERCEL_PROJECT_ID?: string;
-  VERCEL_TEAM_ID?: string;
-  SPRITES_TOKEN?: string;
-  CLOUDFLARE_SANDBOX_BASE_URL?: string;
-  CLOUDFLARE_API_TOKEN?: string;
-  EDGEONE_FUNCTION_URL?: string;
-  EDGEONE_API_TOKEN?: string;
+  EDGEONE_WORKER_URL?: string;
+  CLOUDFLARE_WORKER_URL?: string;
   API_TOKEN?: string;
   DEFAULT_PROVIDER?: string;
 }
