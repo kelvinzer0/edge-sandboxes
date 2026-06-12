@@ -6,13 +6,13 @@ Deploy once to Cloudflare Workers or EdgeOne, manage all sandbox providers from 
 
 ## Why?
 
-Most sandbox libraries are **provider-specific**. You need a different SDK for E2B, Daytona, Modal, etc. And if one provider goes down, you're stuck.
+Most sandbox libraries are **provider-specific**. You need a different SDK for E2B, Daytona, etc. And if one provider goes down, you're stuck.
 
 **edge-sandboxes** solves this:
 
 1. **One edge worker** — deploy to Cloudflare or EdgeOne
-2. **All providers** — E2B, Daytona, Modal, Cloudflare, EdgeOne in one place
-3. **Automatic fallback** — if E2B fails, try Daytona, then Modal...
+2. **All providers** — E2B, Daytona, Cloudflare, EdgeOne in one place
+3. **Automatic fallback** — if E2B fails, try Daytona, then Cloudflare...
 4. **Circuit breakers** — unhealthy providers are temporarily skipped
 
 ## Supported Providers
@@ -21,7 +21,6 @@ Most sandbox libraries are **provider-specific**. You need a different SDK for E
 |----------|------------|--------|
 | E2B | `E2B_API_KEY` | ✅ |
 | Daytona | `DAYTONA_API_KEY` | ✅ |
-| Modal | `MODAL_TOKEN_ID` | ✅ |
 | Cloudflare Sandbox | `CLOUDFLARE_SANDBOX_BASE_URL` + `CLOUDFLARE_API_TOKEN` | ✅ |
 | EdgeOne | `EDGEONE_FUNCTION_URL` | ✅ |
 
@@ -119,7 +118,7 @@ curl -X POST https://edge-sandboxes-dpl8r4b932li.edgeone.dev/api/sandbox/create 
   -H "Content-Type: application/json" \
   -d '{
     "provider": "e2b",
-    "fallback": ["daytona", "modal"],
+    "fallback": ["daytona", "cloudflare"],
     "image": "python:3.12-slim",
     "labels": {"project": "ml-training"},
     "env_vars": {"API_KEY": "xxx"},
@@ -177,7 +176,7 @@ If a provider fails, the next one in the chain is tried automatically:
 ```json
 {
   "provider": "e2b",
-  "fallback": ["daytona", "modal", "cloudflare"]
+  "fallback": ["daytona", "cloudflare"]
 }
 ```
 
@@ -190,8 +189,7 @@ Use multiple API keys per provider. Set comma-separated values:
 ```bash
 # In EdgeOne dashboard or wrangler.toml
 E2B_API_KEY=key1,key2,key3
-DAYTONA_API_KEY=daytona-key-1,daytona-key2
-MODAL_TOKEN_ID=modal-token-1,modal-token-2
+DAYTONA_API_KEY=daytona-key-1,daytona-key-2
 ```
 
 The worker automatically distributes requests across accounts using round-robin. Each account has its own circuit breaker.
@@ -338,7 +336,6 @@ func main() {
 | EdgeOne | ✅ |
 | E2B provider | ✅ |
 | Daytona provider | ✅ |
-| Modal provider | ✅ |
 | Cloudflare Sandbox provider | ✅ |
 | EdgeOne provider | ✅ |
 | Fallback chains | ✅ |

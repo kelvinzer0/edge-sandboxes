@@ -2,7 +2,6 @@ export interface Env {
   E2B_API_KEY?: string;
   DAYTONA_API_KEY?: string;
   DAYTONA_API_URL?: string;
-  MODAL_TOKEN_ID?: string;
   HOPX_API_KEY?: string;
   VERCEL_TOKEN?: string;
   VERCEL_PROJECT_ID?: string;

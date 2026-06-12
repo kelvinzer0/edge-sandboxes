@@ -308,48 +308,6 @@ class DaytonaProvider {
   }
 }
 
-class ModalProvider {
-  name = "modal";
-  constructor(token) { this.token = token; }
-
-  async createSandbox(req) {
-    const resp = await fetch("https://api.modal.com/v1/sandboxes", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${this.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ image: req.image || "python:3.12-slim", env: req.env_vars || {}, timeout: req.timeout || 120 }),
-    });
-    if (!resp.ok) throw new Error(`Modal create failed: ${resp.status}`);
-    const data = await resp.json();
-    return { id: data.id, provider: this.name, state: "running", labels: req.labels };
-  }
-
-  async executeCommand(sandboxId, command, timeout) {
-    const start = Date.now();
-    const resp = await fetch(`https://api.modal.com/v1/sandboxes/${sandboxId}/exec`, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${this.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ command, timeout: timeout || 30 }),
-    });
-    if (!resp.ok) throw new Error(`Modal exec failed: ${resp.status}`);
-    const data = await resp.json();
-    return { exit_code: data.exit_code ?? 0, stdout: data.stdout ?? "", stderr: data.stderr ?? "", duration_ms: Date.now() - start };
-  }
-
-  async destroySandbox(sandboxId) {
-    const resp = await fetch(`https://api.modal.com/v1/sandboxes/${sandboxId}`, {
-      method: "DELETE", headers: { "Authorization": `Bearer ${this.token}` },
-    });
-    return resp.ok;
-  }
-
-  async listSandboxes() {
-    const resp = await fetch("https://api.modal.com/v1/sandboxes", { headers: { "Authorization": `Bearer ${this.token}` } });
-    if (!resp.ok) return [];
-    const data = await resp.json();
-    return data.map(s => ({ id: s.id, provider: this.name, state: s.state || "running" }));
-  }
-}
-
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 class SandboxRouter {
@@ -442,14 +400,6 @@ function createRouter(env) {
       ? new MultiAccountProvider("daytona", keys.map(k => new DaytonaProvider(k, env.DAYTONA_API_URL)))
       : new DaytonaProvider(keys[0], env.DAYTONA_API_URL);
     router.registerProvider("daytona", provider);
-  }
-
-  if (env.MODAL_TOKEN_ID) {
-    const keys = splitKeys(env.MODAL_TOKEN_ID);
-    const provider = keys.length > 1
-      ? new MultiAccountProvider("modal", keys.map(k => new ModalProvider(k)))
-      : new ModalProvider(keys[0]);
-    router.registerProvider("modal", provider);
   }
 
   if (env.DEFAULT_PROVIDER) router.defaultProvider = env.DEFAULT_PROVIDER;
