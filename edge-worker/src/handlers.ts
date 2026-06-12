@@ -66,8 +66,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const execMatch = path.match(/^\/([^/]+)\/exec$/);
     if (execMatch && request.method === "POST") {
       const sandboxId = execMatch[1];
-      const body = (await request.json()) as { command: string; provider: string; timeout?: number };
-      const result = await router.executeCommand(body.provider, sandboxId, body.command, body.timeout);
+      const body = (await request.json()) as { command: string; provider?: string; timeout?: number };
+      const provider = body.provider || env.DEFAULT_PROVIDER || "cloudflare";
+      const result = await router.executeCommand(provider, sandboxId, body.command, body.timeout);
       return jsonResponse(result);
     }
 
