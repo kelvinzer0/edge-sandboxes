@@ -11,6 +11,35 @@ interface E2BSandboxResponse {
   envdAccessToken?: string | null;
 }
 
+function encodeConnectEnvelope(obj: unknown): Uint8Array {
+  const json = new TextEncoder().encode(JSON.stringify(obj));
+  const header = new Uint8Array(5);
+  header[0] = 0x00; // no compression
+  header[1] = (json.length >>> 24) & 0xff;
+  header[2] = (json.length >>> 16) & 0xff;
+  header[3] = (json.length >>> 8) & 0xff;
+  header[4] = json.length & 0xff;
+  const result = new Uint8Array(5 + json.length);
+  result.set(header);
+  result.set(json, 5);
+  return result;
+}
+
+function decodeConnectEnvelopes(buffer: Uint8Array): unknown[] {
+  const messages: unknown[] = [];
+  let pos = 0;
+  while (pos + 5 <= buffer.length) {
+    const msgLen = (buffer[pos + 1] << 24) | (buffer[pos + 2] << 16) | (buffer[pos + 3] << 8) | buffer[pos + 4];
+    if (pos + 5 + msgLen > buffer.length) break;
+    const jsonBytes = buffer.slice(pos + 5, pos + 5 + msgLen);
+    try {
+      messages.push(JSON.parse(new TextDecoder().decode(jsonBytes)));
+    } catch {}
+    pos += 5 + msgLen;
+  }
+  return messages;
+}
+
 export class E2BProvider extends SandboxProvider {
   name = "e2b";
   private apiKey: string;
@@ -62,17 +91,19 @@ export class E2BProvider extends SandboxProvider {
     };
     if (token) headers["X-Access-Token"] = token;
 
+    const body = encodeConnectEnvelope({
+      process: {
+        cmd: "bash",
+        args: ["-c", command],
+        envs: {},
+        cwd: null,
+      },
+    });
+
     const resp = await fetch(`https://49983-${sandboxId}.e2b.app/process.Process/Start`, {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        process: {
-          cmd: "bash",
-          args: ["-c", command],
-          envs: {},
-          cwd: null,
-        },
-      }),
+      body: body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer,
     });
 
     if (!resp.ok) {
@@ -80,66 +111,30 @@ export class E2BProvider extends SandboxProvider {
       throw new Error(`E2B exec failed: ${resp.status} ${errText}`);
     }
 
-    // Read streaming response properly
-    const reader = resp.body?.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+    const arrayBuf = await resp.arrayBuffer();
+    const raw = new Uint8Array(arrayBuf);
+    const messages = decodeConnectEnvelopes(raw);
+
     let exitCode = 0;
     let stdout = "";
     let stderr = "";
     let errorMsg = "";
 
-    if (reader) {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+    for (const msg of messages) {
+      const event = (msg as any).event;
+      if (!event) continue;
 
-        // Process complete messages (separated by \r\n)
-        const parts = buffer.split(/\r\n/);
-        buffer = parts.pop() || "";
-
-        for (const part of parts) {
-          const trimmed = part.trim();
-          if (!trimmed) continue;
-          try {
-            const parsed = JSON.parse(trimmed);
-            const event = parsed.event;
-            if (!event) continue;
-
-            if (event.start) {
-              // Process started
-            } else if (event.data) {
-              if (event.data.stdout) stdout += atob(event.data.stdout);
-              if (event.data.stderr) stderr += atob(event.data.stderr);
-              if (event.data.pty) stdout += atob(event.data.pty);
-            } else if (event.end) {
-              const status = event.end.status || "";
-              const exitMatch = status.match(/exit status (\d+)/);
-              exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
-              errorMsg = event.end.error || "";
-            }
-          } catch {
-            // Skip non-JSON messages
-          }
-        }
-      }
-
-      // Process remaining buffer
-      if (buffer.trim()) {
-        try {
-          const parsed = JSON.parse(buffer.trim());
-          const event = parsed.event;
-          if (event?.data) {
-            if (event.data.stdout) stdout += atob(event.data.stdout);
-            if (event.data.stderr) stderr += atob(event.data.stderr);
-          } else if (event?.end) {
-            const status = event.end.status || "";
-            const exitMatch = status.match(/exit status (\d+)/);
-            exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
-            errorMsg = event.end.error || "";
-          }
-        } catch {}
+      if (event.start) {
+        // Process started
+      } else if (event.data) {
+        if (event.data.stdout) stdout += atob(event.data.stdout);
+        if (event.data.stderr) stderr += atob(event.data.stderr);
+        if (event.data.pty) stdout += atob(event.data.pty);
+      } else if (event.end) {
+        const status = event.end.status || "";
+        const exitMatch = status.match(/exit status (\d+)/);
+        exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
+        errorMsg = event.end.error || "";
       }
     }
 

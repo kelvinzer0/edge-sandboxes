@@ -148,6 +148,113 @@ function splitKeys(raw) {
 
 const E2B_API_BASE = "https://api.e2b.app";
 
+function encodeConnectEnvelope(obj) {
+  const json = new TextEncoder().encode(JSON.stringify(obj));
+  const header = new Uint8Array(5);
+  header[0] = 0x00;
+  header[1] = (json.length >>> 24) & 0xff;
+  header[2] = (json.length >>> 16) & 0xff;
+  header[3] = (json.length >>> 8) & 0xff;
+  header[4] = json.length & 0xff;
+  const result = new Uint8Array(5 + json.length);
+  result.set(header);
+  result.set(json, 5);
+  return result;
+}
+
+function decodeConnectEnvelopes(buffer) {
+  const messages = [];
+  let pos = 0;
+  while (pos + 5 <= buffer.length) {
+    const msgLen = (buffer[pos + 1] << 24) | (buffer[pos + 2] << 16) | (buffer[pos + 3] << 8) | buffer[pos + 4];
+    if (pos + 5 + msgLen > buffer.length) break;
+    const jsonBytes = buffer.slice(pos + 5, pos + 5 + msgLen);
+    try { messages.push(JSON.parse(new TextDecoder().decode(jsonBytes))); } catch {}
+    pos += 5 + msgLen;
+  }
+  return messages;
+}
+
+class E2BProvider {
+  name = "e2b";
+  constructor(apiKey) {
+    this.apiKey = apiKey;
+    this.sandboxes = new Map();
+  }
+
+  headers() {
+    return { "X-API-Key": this.apiKey, "Content-Type": "application/json" };
+  }
+
+  async createSandbox(req) {
+    const resp = await fetch(`${E2B_API_BASE}/sandboxes`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ templateID: req.image || "base", envVars: req.env_vars || {}, timeout: req.timeout || 120 }),
+    });
+    if (!resp.ok) throw new Error(`E2B create failed: ${resp.status} ${await resp.text()}`);
+    const data = await resp.json();
+    this.sandboxes.set(data.sandboxID, { accessToken: data.envdAccessToken });
+    return { id: data.sandboxID, provider: this.name, state: "running", labels: req.labels };
+  }
+
+  async executeCommand(sandboxId, command, timeout) {
+    const start = Date.now();
+    const meta = this.sandboxes.get(sandboxId);
+    const token = meta?.accessToken;
+
+    const headers = { "Content-Type": "application/connect+json", "Connect-Protocol-Version": "1" };
+    if (token) headers["X-Access-Token"] = token;
+
+    const body = encodeConnectEnvelope({ process: { cmd: "bash", args: ["-c", command], envs: {}, cwd: null } });
+
+    const resp = await fetch(`https://49983-${sandboxId}.e2b.app/process.Process/Start`, {
+      method: "POST",
+      headers,
+      body,
+    });
+    if (!resp.ok) throw new Error(`E2B exec failed: ${resp.status}`);
+
+    const arrayBuf = await resp.arrayBuffer();
+    const raw = new Uint8Array(arrayBuf);
+    const messages = decodeConnectEnvelopes(raw);
+
+    let exitCode = 0, stdout = "", stderr = "", error = "";
+
+    for (const msg of messages) {
+      const event = msg.event;
+      if (!event) continue;
+      if (event.data) {
+        if (event.data.stdout) stdout += atob(event.data.stdout);
+        if (event.data.stderr) stderr += atob(event.data.stderr);
+        if (event.data.pty) stdout += atob(event.data.pty);
+      } else if (event.end) {
+        const status = event.end.status || "";
+        const exitMatch = status.match(/exit status (\d+)/);
+        exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
+        error = event.end.error || "";
+      }
+    }
+    return { exit_code: exitCode, stdout, stderr: stderr || error, duration_ms: Date.now() - start };
+  }
+
+  async destroySandbox(sandboxId) {
+    const resp = await fetch(`${E2B_API_BASE}/sandboxes/${sandboxId}`, { method: "DELETE", headers: this.headers() });
+    this.sandboxes.delete(sandboxId);
+    return resp.ok;
+  }
+
+  async listSandboxes() {
+    const resp = await fetch(`${E2B_API_BASE}/sandboxes`, { headers: this.headers() });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    const items = data.sandboxes || data || [];
+    return items.map(s => ({ id: s.sandboxID, provider: this.name, state: s.state || "running" }));
+  }
+}
+
+const E2B_API_BASE = "https://api.e2b.app";
+
 class E2BProvider {
   name = "e2b";
   constructor(apiKey) {
