@@ -346,6 +346,7 @@ class EdgeSandbox:
             E2B_API_KEY=key1,key2,key3  → MultiAccountProvider with round-robin
 
         Priority order:
+        0. Edge Worker (EDGE_WORKER_URL) — recommended, delegates to edge
         1. Daytona  (DAYTONA_API_KEY)
         2. E2B      (E2B_API_KEY)
         3. Sprites  (SPRITES_TOKEN)
@@ -358,6 +359,16 @@ class EdgeSandbox:
 
         router = cls._router
         assert router is not None
+
+        # Edge Worker — highest priority, delegates everything to edge
+        if os.getenv("EDGE_WORKER_URL"):
+            try:
+                cls_type = get_provider_class("edge_worker")
+                if cls_type:
+                    router.register_provider("edge-worker", cls_type())
+                    logger.info("Auto-registered provider: edge-worker (recommended)")
+            except Exception as e:
+                logger.debug(f"Failed to register edge-worker: {e}")
 
         registry: list[tuple[str, str, list[str], str | None]] = [
             ("daytona", "daytona", ["DAYTONA_API_KEY"], "api_key"),
@@ -414,7 +425,14 @@ class EdgeSandbox:
         Supports single key or list of keys for multi-account round-robin.
 
         Examples:
-            # Single account
+            # Edge Worker (recommended — no SDK needed)
+            EdgeSandbox.configure(
+                edge_worker_url="https://my-worker.workers.dev",
+                edge_worker_token="secret",
+                default_provider="edge-worker",
+            )
+
+            # Direct provider
             EdgeSandbox.configure(e2b_api_key="sk-xxx", default_provider="e2b")
 
             # Multiple accounts — round-robin
@@ -422,17 +440,21 @@ class EdgeSandbox:
                 e2b_api_key=["sk-xxx", "sk-yyy", "sk-zzz"],
                 default_provider="e2b",
             )
-
-            # Multiple accounts via comma-separated string
-            EdgeSandbox.configure(
-                e2b_api_key="sk-xxx,sk-yyy,sk-zzz",
-                default_provider="e2b",
-            )
         """
         from .multi_account import MultiAccountProvider
         from .providers import get_provider_class
 
         router = cls._ensure_router()
+
+        # Edge Worker
+        edge_worker_url = provider_configs.get("edge_worker_url")
+        if edge_worker_url:
+            cls_type = get_provider_class("edge_worker")
+            if cls_type:
+                kwargs: dict[str, Any] = {"worker_url": edge_worker_url}
+                if provider_configs.get("edge_worker_token"):
+                    kwargs["api_token"] = provider_configs["edge_worker_token"]
+                router.register_provider("edge-worker", cls_type(**kwargs))
 
         mapping = {
             "e2b_api_key": ("e2b", "api_key"),

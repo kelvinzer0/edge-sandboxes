@@ -62,15 +62,19 @@ Both share the same provider abstraction, circuit breaker pattern, and fallback 
 
 ## Quick Start
 
-### Python Library
+### Recommended: Python + Edge Worker
+
+Deploy the edge worker once, then use it from Python without any provider SDKs:
 
 ```bash
-pip install edge-sandboxes
+# 1. Deploy edge worker to Cloudflare
+cd edge-worker
+npx wrangler secret put E2B_API_KEY
+npx wrangler deploy
 
-# Install only the providers you need
-pip install edge-sandboxes[e2b]
-pip install edge-sandboxes[daytona]
-pip install edge-sandboxes[all]
+# 2. Set env var in your Python app
+export EDGE_WORKER_URL=https://my-worker.workers.dev
+export EDGE_WORKER_TOKEN=your-api-token
 ```
 
 ```python
@@ -78,23 +82,30 @@ import asyncio
 from edge_sandboxes import EdgeSandbox
 
 async def main():
-    # Auto-detect provider from env vars
+    # Auto-detects EDGE_WORKER_URL, delegates to edge worker
+    # No provider SDKs needed — fallback + circuit breaker runs at the edge
     async with EdgeSandbox.create() as sbx:
         result = await sbx.execute("python -c 'print(42)'")
         print(result.stdout)  # "42"
 
-    # Explicit provider with fallback chain
-    async with EdgeSandbox.create(
-        provider="e2b",
-        fallback=["daytona", "cloudflare"],
-    ) as sbx:
-        result = await sbx.execute("node -e 'console.log(1337)'")
-        print(result.stdout)
+asyncio.run(main())
+```
 
-    # One-shot convenience
-    from edge_sandboxes import run
-    result = await run("echo hello world")
-    print(result.stdout)
+### Direct Provider (no edge worker)
+
+```bash
+pip install edge-sandboxes[e2b]
+export E2B_API_KEY=your-key
+```
+
+```python
+import asyncio
+from edge_sandboxes import EdgeSandbox
+
+async def main():
+    async with EdgeSandbox.create() as sbx:
+        result = await sbx.execute("python -c 'print(42)'")
+        print(result.stdout)
 
 asyncio.run(main())
 ```
@@ -273,12 +284,13 @@ Each account has its own circuit breaker — if one account hits rate limits, it
 | Feature | Status |
 |---------|--------|
 | Python library | ✅ |
-| Edge/CF Worker | ✅ |
+| Edge Worker (CF + EdgeOne) | ✅ |
 | Zero deps | ✅ (optional httpx) |
 | Fallback chains | ✅ |
 | Circuit breakers | ✅ |
 | Health-aware routing | ✅ |
 | Multi-account round-robin | ✅ |
+| Edge Worker as provider | ✅ |
 | CLI | Planned |
 | Connection pooling | Planned |
 

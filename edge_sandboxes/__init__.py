@@ -7,7 +7,7 @@ with automatic fallback, circuit breakers, and edge deployment support.
 Providers: E2B, Daytona, Modal, Cloudflare, Fly.io Sprites, Hopx, Vercel
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .core import (
     EdgeSandbox,

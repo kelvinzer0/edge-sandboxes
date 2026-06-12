@@ -16,6 +16,7 @@ _PROVIDER_MAP: dict[str, str] = {
     "sprites": ".providers.sprites",
     "hopx": ".providers.hopx",
     "vercel": ".providers.vercel",
+    "edge_worker": ".providers.edge_worker",
 }
 
 
@@ -39,6 +40,7 @@ def get_provider_class(name: str) -> type[SandboxProvider] | None:
             "sprites": "SpritesProvider",
             "hopx": "HopxProvider",
             "vercel": "VercelProvider",
+            "edge_worker": "EdgeWorkerProvider",
         }[name]
         return getattr(mod, class_name, None)
     except ImportError:
