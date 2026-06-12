@@ -25,7 +25,7 @@ export class DaytonaProvider extends SandboxProvider {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({
-        snapshot: req.image || "daytonaio/sandbox:latest",
+        snapshot: req.image || "daytona-small",
         env: req.env_vars || {},
         labels: req.labels || {},
       }),
