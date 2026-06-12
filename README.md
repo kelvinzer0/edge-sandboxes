@@ -2,50 +2,41 @@
 
 **Edge-native universal sandbox router with automatic fallback.**
 
-Write once, run anywhere — from Cloudflare Workers to your laptop.
-
-**edge-sandboxes** — edge-first universal sandbox router.
+Deploy once to Cloudflare Workers or EdgeOne, manage all sandbox providers from one place.
 
 ## Why?
 
-Most Python sandbox libraries are **server-only**. They need a full Python runtime with asyncio. You can't use them from:
+Most sandbox libraries are **provider-specific**. You need a different SDK for E2B, Daytona, Modal, etc. And if one provider goes down, you're stuck.
 
-- Cloudflare Workers (V8 isolates, no Python)
-- Edge functions
-- Lightweight serverless where a full Python process is overkill
+**edge-sandboxes** solves this:
 
-**edge-sandboxes** solves this with a dual architecture:
+1. **One edge worker** — deploy to Cloudflare or EdgeOne
+2. **All providers** — E2B, Daytona, Modal, Cloudflare, EdgeOne in one place
+3. **Automatic fallback** — if E2B fails, try Daytona, then Modal...
+4. **Circuit breakers** — unhealthy providers are temporarily skipped
 
-1. **Python library** — clean async API, zero required dependencies
-2. **Edge Worker** — one unified TypeScript worker, deploy to Cloudflare or EdgeOne
+## Supported Providers
 
-Both share the same provider abstraction, circuit breaker pattern, and fallback chain logic.
-
-## Supported Edge Platforms
-
-| Platform | Runtime | Status |
-|----------|---------|--------|
-| **Cloudflare Workers** | V8 isolates | ✅ Ready |
-| **Tencent EdgeOne** | Edge Functions (3200+ nodes) | ✅ Ready |
-| **Deno Deploy** | V8 isolates | Planned |
-| **Vercel Edge** | V8 isolates | Planned |
+| Provider | Env Var(s) | Status |
+|----------|------------|--------|
+| E2B | `E2B_API_KEY` | ✅ |
+| Daytona | `DAYTONA_API_KEY` | ✅ |
+| Modal | `MODAL_TOKEN_ID` | ✅ |
+| Cloudflare Sandbox | `CLOUDFLARE_SANDBOX_BASE_URL` + `CLOUDFLARE_API_TOKEN` | ✅ |
+| EdgeOne | `EDGEONE_FUNCTION_URL` | ✅ |
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   Your Application                   │
+│               Your Application                      │
 │                                                     │
-│   Python (any runtime)    │    JS/TS (any runtime)  │
-│   ┌─────────────────┐    │    ┌──────────────────┐  │
-│   │ edge-sandboxes  │    │    │ fetch() to edge  │  │
-│   │ (pip package)   │    │    │ Worker endpoint  │  │
-│   └────────┬────────┘    │    └────────┬─────────┘  │
-└────────────┼─────────────┼─────────────┼────────────┘
-             │             │             │
-             ▼             ▼             ▼
+│   curl / fetch / any HTTP client                    │
+└──────────────────────┬──────────────────────────────┘
+                       │ HTTP
+                       ▼
 ┌─────────────────────────────────────────────────────┐
-│       Edge Router (CF Worker / EdgeOne Function)    │
+│            Edge Worker (CF / EdgeOne)               │
 │                                                     │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐             │
 │  │ Circuit │  │ Fallback│  │ Health  │             │
@@ -54,101 +45,142 @@ Both share the same provider abstraction, circuit breaker pattern, and fallback 
 │       └────────────┼────────────┘                   │
 │                    ▼                                │
 │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐       │
-│  │  E2B   │ │Daytona │ │ Modal  │ │ EdgeOne│       │
-│  │(API)   │ │(API)   │ │(API)   │ │(Proxy) │       │
+│  │  E2B   │ │Daytona │ │ Modal  │ │CloudFl │       │
 │  └────────┘ └────────┘ └────────┘ └────────┘       │
 └─────────────────────────────────────────────────────┘
 ```
 
 ## Quick Start
 
-### Recommended: Python + Edge Worker
-
-Deploy the edge worker once, then use it from Python without any provider SDKs:
-
-```bash
-# 1. Deploy edge worker to Cloudflare
-cd edge-worker
-npx wrangler secret put E2B_API_KEY
-npx wrangler deploy
-
-# 2. Set env var in your Python app
-export EDGE_WORKER_URL=https://my-worker.workers.dev
-export EDGE_WORKER_TOKEN=your-api-token
-```
-
-```python
-import asyncio
-from edge_sandboxes import EdgeSandbox
-
-async def main():
-    # Auto-detects EDGE_WORKER_URL, delegates to edge worker
-    # No provider SDKs needed — fallback + circuit breaker runs at the edge
-    async with EdgeSandbox.create() as sbx:
-        result = await sbx.execute("python -c 'print(42)'")
-        print(result.stdout)  # "42"
-
-asyncio.run(main())
-```
-
-### Direct Provider (no edge worker)
-
-```bash
-pip install edge-sandboxes[e2b]
-export E2B_API_KEY=your-key
-```
-
-```python
-import asyncio
-from edge_sandboxes import EdgeSandbox
-
-async def main():
-    async with EdgeSandbox.create() as sbx:
-        result = await sbx.execute("python -c 'print(42)'")
-        print(result.stdout)
-
-asyncio.run(main())
-```
-
-### Edge Worker (Cloudflare / EdgeOne)
-
-One unified worker, deploy to either platform:
+### Cloudflare Workers
 
 ```bash
 cd edge-worker
 
-# Cloudflare Workers
+# Set secrets
 npx wrangler secret put API_TOKEN
 npx wrangler secret put E2B_API_KEY
-npx wrangler deploy
+npx wrangler secret put DAYTONA_API_KEY
 
-# EdgeOne — copy src/core.ts + src/edgeone.ts to your Pages project
-# /edge-functions/api/sandbox/[[default]].js
-# Set env vars in EdgeOne dashboard
+# Deploy
+npx wrangler deploy
 ```
 
+### EdgeOne
+
 ```bash
-# Create a sandbox
+# 1. Create a Pages project on EdgeOne console
+#    → https://console.cloud.tencent.com/edgeone/pages
+
+# 2. Copy edge-worker/src/core.ts + edge-worker/src/edgeone.ts to:
+#    /edge-functions/api/sandbox/[[default]].js
+
+# 3. Set env vars in EdgeOne dashboard
+
+# 4. Deploy via EdgeOne CLI or dashboard
+```
+
+## API
+
+### Create Sandbox
+
+```bash
 curl -X POST https://your-worker.workers.dev/api/sandbox/create \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "e2b",
-    "fallback": ["daytona"],
+    "fallback": ["daytona", "modal"],
     "image": "python:3.12-slim",
-    "labels": {"project": "ml-training"}
+    "labels": {"project": "ml-training"},
+    "env_vars": {"API_KEY": "xxx"},
+    "timeout": 300
   }'
+```
 
-# Execute a command
-curl -X POST https://your-worker.workers.dev/api/sandbox/sbx-123/exec \
+Response:
+```json
+{
+  "id": "sbx-abc123",
+  "provider": "e2b",
+  "state": "running",
+  "_provider": "e2b"
+}
+```
+
+### Execute Command
+
+```bash
+curl -X POST https://your-worker.workers.dev/api/sandbox/sbx-abc123/exec \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"command": "python train.py", "provider": "e2b"}'
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "python train.py",
+    "provider": "e2b",
+    "timeout": 60
+  }'
+```
 
-# Check provider health
+Response:
+```json
+{
+  "exit_code": 0,
+  "stdout": "Training complete!",
+  "stderr": "",
+  "duration_ms": 1234
+}
+```
+
+### Destroy Sandbox
+
+```bash
+curl -X DELETE "https://your-worker.workers.dev/api/sandbox/sbx-abc123?provider=e2b" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Health Check
+
+```bash
 curl https://your-worker.workers.dev/api/health
 ```
 
-### From JavaScript/TypeScript (via Cloudflare Worker)
+Response:
+```json
+{
+  "status": "ok",
+  "providers": [
+    {"name": "e2b", "healthy": true, "circuit_state": "closed", "failure_count": 0},
+    {"name": "daytona", "healthy": true, "circuit_state": "closed", "failure_count": 0}
+  ]
+}
+```
+
+## Fallback Chains
+
+If a provider fails, the next one in the chain is tried automatically:
+
+```json
+{
+  "provider": "e2b",
+  "fallback": ["daytona", "modal", "cloudflare"]
+}
+```
+
+Circuit breakers track provider health. If a provider fails 5 times, it's marked unhealthy for 60 seconds before retrying.
+
+## Multi-Account Round-Robin
+
+Use multiple API keys per provider. Set comma-separated values:
+
+```bash
+# In wrangler.toml or EdgeOne dashboard
+E2B_API_KEY=key1,key2,key3
+DAYTONA_API_KEY=daytona-key-1,daytona-key-2
+```
+
+The worker automatically distributes requests across accounts using round-robin.
+
+## JavaScript/TypeScript Client
 
 ```typescript
 const API = "https://your-worker.workers.dev";
@@ -186,113 +218,21 @@ const result = await fetch(`${API}/api/sandbox/${sbx.id}/exec`, {
 console.log(result.stdout); // "42"
 ```
 
-## Provider Priority (Auto-detect)
-
-When no provider is specified, the library auto-detects from environment variables:
-
-| Priority | Provider | Env Var(s) |
-|----------|----------|------------|
-| 1 | Daytona | `DAYTONA_API_KEY` |
-| 2 | E2B | `E2B_API_KEY` |
-| 3 | Sprites | `SPRITES_TOKEN` |
-| 4 | Hopx | `HOPX_API_KEY` |
-| 5 | Modal | `MODAL_TOKEN_ID` |
-| 6 | Cloudflare | `CLOUDFLARE_SANDBOX_BASE_URL` + `CLOUDFLARE_API_TOKEN` |
-| 7 | EdgeOne | `EDGEONE_FUNCTION_URL` (+ optional `EDGEONE_API_TOKEN`) |
-
-## Fallback Chains
-
-The killer feature. If a provider fails, the next one in the chain is tried automatically:
-
-```python
-# Python
-async with EdgeSandbox.create(
-    provider="e2b",           # Try E2B first
-    fallback=["daytona", "modal"],  # If E2B fails, try Daytona, then Modal
-) as sbx:
-    ...
-```
-
-```json
-// Cloudflare Worker API
-{
-  "provider": "e2b",
-  "fallback": ["daytona", "modal"],
-  "image": "python:3.12"
-}
-```
-
-Circuit breakers track provider health. If a provider fails 5 times, it's marked unhealthy for 60 seconds before retrying.
-
-## Multi-Account Round-Robin
-
-Use multiple API keys per provider with automatic round-robin distribution. Useful for bypassing rate limits and distributing load across accounts.
-
-### Environment Variables (comma-separated)
-
-```bash
-export E2B_API_KEY="key-account-1,key-account-2,key-account-3"
-export DAYTONA_API_KEY="daytona-key-1,daytona-key-2"
-```
-
-Auto-detected on first use — no code changes needed.
-
-### Manual Configuration
-
-```python
-from edge_sandboxes import EdgeSandbox
-
-# List of keys
-EdgeSandbox.configure(
-    e2b_api_key=["key-1", "key-2", "key-3"],
-    default_provider="e2b",
-)
-
-# Or comma-separated string
-EdgeSandbox.configure(
-    e2b_api_key="key-1,key-2,key-3",
-    default_provider="e2b",
-)
-```
-
-### Direct Usage
-
-```python
-from edge_sandboxes import MultiAccountProvider
-from edge_sandboxes.providers.e2b import E2BProvider
-
-provider = MultiAccountProvider(
-    provider_class=E2BProvider,
-    accounts=[
-        {"api_key": "key-1", "account_id": "team-a"},
-        {"api_key": "key-2", "account_id": "team-b"},
-        {"api_key": "key-3", "account_id": "team-c"},
-    ],
-)
-
-# Round-robin: each create_sandbox call picks the next healthy account
-instance = await provider.create_sandbox(config)  # → account-0
-instance = await provider.create_sandbox(config)  # → account-1
-instance = await provider.create_sandbox(config)  # → account-2
-instance = await provider.create_sandbox(config)  # → account-0 (wraps)
-```
-
-Each account has its own circuit breaker — if one account hits rate limits, it's temporarily skipped while others continue.
-
 ## Features
 
 | Feature | Status |
 |---------|--------|
-| Python library | ✅ |
-| Edge Worker (CF + EdgeOne) | ✅ |
-| Zero deps | ✅ (optional httpx) |
+| Cloudflare Workers | ✅ |
+| EdgeOne | ✅ |
+| E2B provider | ✅ |
+| Daytona provider | ✅ |
+| Modal provider | ✅ |
+| Cloudflare Sandbox provider | ✅ |
+| EdgeOne provider | ✅ |
 | Fallback chains | ✅ |
 | Circuit breakers | ✅ |
-| Health-aware routing | ✅ |
 | Multi-account round-robin | ✅ |
-| Edge Worker as provider | ✅ |
-| CLI | Planned |
-| Connection pooling | Planned |
+| Health-aware routing | ✅ |
 
 ## License
 

@@ -8,3 +8,6 @@ DEFAULT_PROVIDER = "e2b"
 # Set secrets via: npx wrangler secret put API_TOKEN
 # Set secrets via: npx wrangler secret put E2B_API_KEY
 # Set secrets via: npx wrangler secret put DAYTONA_API_KEY
+# Set secrets via: npx wrangler secret put MODAL_TOKEN_ID
+# Set secrets via: npx wrangler secret put CLOUDFLARE_SANDBOX_BASE_URL
+# Set secrets via: npx wrangler secret put CLOUDFLARE_API_TOKEN

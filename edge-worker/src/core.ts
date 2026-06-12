@@ -266,6 +266,211 @@ class DaytonaProvider extends SandboxProvider {
   }
 }
 
+class ModalProvider extends SandboxProvider {
+  name = "modal";
+  private token: string;
+
+  constructor(token: string) {
+    super();
+    this.token = token;
+  }
+
+  async createSandbox(req: SandboxRequest): Promise<SandboxInstance> {
+    const resp = await fetch("https://api.modal.com/v1/sandboxes", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        image: req.image || "python:3.12-slim",
+        env: req.env_vars || {},
+        timeout: req.timeout || 120,
+      }),
+    });
+    if (!resp.ok) throw new Error(`Modal create failed: ${resp.status}`);
+    const data = (await resp.json()) as any;
+    return { id: data.id, provider: this.name, state: "running", labels: req.labels };
+  }
+
+  async executeCommand(sandboxId: string, command: string, timeout?: number): Promise<ExecutionResult> {
+    const start = Date.now();
+    const resp = await fetch(`https://api.modal.com/v1/sandboxes/${sandboxId}/exec`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command, timeout: timeout || 30 }),
+    });
+    if (!resp.ok) throw new Error(`Modal exec failed: ${resp.status}`);
+    const data = (await resp.json()) as any;
+    return {
+      exit_code: data.exit_code ?? 0,
+      stdout: data.stdout ?? "",
+      stderr: data.stderr ?? "",
+      duration_ms: Date.now() - start,
+    };
+  }
+
+  async destroySandbox(sandboxId: string): Promise<boolean> {
+    const resp = await fetch(`https://api.modal.com/v1/sandboxes/${sandboxId}`, {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${this.token}` },
+    });
+    return resp.ok;
+  }
+
+  async listSandboxes(): Promise<SandboxInstance[]> {
+    const resp = await fetch("https://api.modal.com/v1/sandboxes", {
+      headers: { "Authorization": `Bearer ${this.token}` },
+    });
+    if (!resp.ok) return [];
+    const data = (await resp.json()) as any[];
+    return data.map((s: any) => ({
+      id: s.id,
+      provider: this.name,
+      state: s.state || "running",
+    }));
+  }
+}
+
+class CloudflareSandboxProvider extends SandboxProvider {
+  name = "cloudflare";
+  private baseUrl: string;
+  private apiToken: string;
+
+  constructor(baseUrl: string, apiToken: string) {
+    super();
+    this.baseUrl = baseUrl;
+    this.apiToken = apiToken;
+  }
+
+  async createSandbox(req: SandboxRequest): Promise<SandboxInstance> {
+    const resp = await fetch(`${this.baseUrl}/api/session/create`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        env: req.env_vars || {},
+        cwd: "/workspace",
+        isolation: true,
+      }),
+    });
+    if (!resp.ok) throw new Error(`Cloudflare create failed: ${resp.status}`);
+    const data = (await resp.json()) as any;
+    return { id: data.id || data.sessionId, provider: this.name, state: "running", labels: req.labels };
+  }
+
+  async executeCommand(sandboxId: string, command: string, timeout?: number): Promise<ExecutionResult> {
+    const start = Date.now();
+    const resp = await fetch(`${this.baseUrl}/api/execute`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ id: sandboxId, command }),
+    });
+    if (!resp.ok) throw new Error(`Cloudflare exec failed: ${resp.status}`);
+    const data = (await resp.json()) as any;
+    return {
+      exit_code: data.exitCode ?? data.exit_code ?? 0,
+      stdout: data.stdout ?? "",
+      stderr: data.stderr ?? "",
+      duration_ms: Date.now() - start,
+    };
+  }
+
+  async destroySandbox(sandboxId: string): Promise<boolean> {
+    const resp = await fetch(`${this.baseUrl}/api/process/kill-all?session=${sandboxId}`, {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${this.apiToken}` },
+    });
+    return resp.ok;
+  }
+
+  async listSandboxes(): Promise<SandboxInstance[]> {
+    const resp = await fetch(`${this.baseUrl}/api/session/list`, {
+      headers: { "Authorization": `Bearer ${this.apiToken}` },
+    });
+    if (!resp.ok) return [];
+    const data = (await resp.json()) as any;
+    const sessions = data.sessions || [];
+    return sessions.map((id: string) => ({
+      id,
+      provider: this.name,
+      state: "running",
+    }));
+  }
+}
+
+class EdgeOneProvider extends SandboxProvider {
+  name = "edgeone";
+  private functionUrl: string;
+  private apiToken: string;
+
+  constructor(functionUrl: string, apiToken?: string) {
+    super();
+    this.functionUrl = functionUrl;
+    this.apiToken = apiToken || "";
+  }
+
+  async createSandbox(req: SandboxRequest): Promise<SandboxInstance> {
+    const resp = await fetch(`${this.functionUrl}/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(this.apiToken ? { "Authorization": `Bearer ${this.apiToken}` } : {}),
+      },
+      body: JSON.stringify({
+        provider: req.image,
+        image: req.image,
+        labels: req.labels || {},
+        env_vars: req.env_vars || {},
+        timeout: req.timeout,
+      }),
+    });
+    if (!resp.ok) throw new Error(`EdgeOne create failed: ${resp.status}`);
+    const data = (await resp.json()) as any;
+    return { id: data.id, provider: `edgeone/${data._provider || "unknown"}`, state: "running", labels: req.labels };
+  }
+
+  async executeCommand(sandboxId: string, command: string, timeout?: number): Promise<ExecutionResult> {
+    const start = Date.now();
+    const resp = await fetch(`${this.functionUrl}/${sandboxId}/exec`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(this.apiToken ? { "Authorization": `Bearer ${this.apiToken}` } : {}),
+      },
+      body: JSON.stringify({ command, timeout }),
+    });
+    if (!resp.ok) throw new Error(`EdgeOne exec failed: ${resp.status}`);
+    const data = (await resp.json()) as any;
+    return {
+      exit_code: data.exit_code ?? 0,
+      stdout: data.stdout ?? "",
+      stderr: data.stderr ?? "",
+      duration_ms: data.duration_ms ?? Date.now() - start,
+    };
+  }
+
+  async destroySandbox(sandboxId: string): Promise<boolean> {
+    const resp = await fetch(`${this.functionUrl}/${sandboxId}`, {
+      method: "DELETE",
+      headers: this.apiToken ? { "Authorization": `Bearer ${this.apiToken}` } : {},
+    });
+    return resp.ok;
+  }
+
+  async listSandboxes(): Promise<SandboxInstance[]> {
+    return [];
+  }
+}
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 export class SandboxRouter {
@@ -339,8 +544,17 @@ export class SandboxRouter {
 
 export function createRouter(env: Env): SandboxRouter {
   const router = new SandboxRouter();
+
   if (env.E2B_API_KEY) router.registerProvider("e2b", new E2BProvider(env.E2B_API_KEY));
   if (env.DAYTONA_API_KEY) router.registerProvider("daytona", new DaytonaProvider(env.DAYTONA_API_KEY, env.DAYTONA_API_URL));
+  if (env.MODAL_TOKEN_ID) router.registerProvider("modal", new ModalProvider(env.MODAL_TOKEN_ID));
+  if (env.CLOUDFLARE_SANDBOX_BASE_URL && env.CLOUDFLARE_API_TOKEN) {
+    router.registerProvider("cloudflare", new CloudflareSandboxProvider(env.CLOUDFLARE_SANDBOX_BASE_URL, env.CLOUDFLARE_API_TOKEN));
+  }
+  if (env.EDGEONE_FUNCTION_URL) {
+    router.registerProvider("edgeone", new EdgeOneProvider(env.EDGEONE_FUNCTION_URL, env.EDGEONE_API_TOKEN));
+  }
+
   if (env.DEFAULT_PROVIDER) router.defaultProvider = env.DEFAULT_PROVIDER;
   return router;
 }
