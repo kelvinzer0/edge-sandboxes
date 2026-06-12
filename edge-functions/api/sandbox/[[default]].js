@@ -4,17 +4,10 @@
  * Single bundled file for EdgeOne Pages Functions.
  * Route: /edge-functions/api/sandbox/[[default]].js
  *
- * Deploy:
- *   1. Create Pages project on EdgeOne console
- *   2. This file is auto-detected
- *   3. Set env vars in dashboard
+ * Supports multiple API keys per provider with round-robin:
+ *   E2B_API_KEY=key1,key2,key3
+ *   DAYTONA_API_KEY=daytona-key1,daytona-key2
  */
-
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-/** @typedef {{ provider?: string; fallback?: string[]; image?: string; labels?: Record<string, string>; env_vars?: Record<string, string>; timeout?: number }} SandboxRequest */
-/** @typedef {{ id: string; provider: string; state: string; labels?: Record<string, string> }} SandboxInstance */
-/** @typedef {{ exit_code: number; stdout: string; stderr: string; duration_ms?: number }} ExecutionResult */
 
 // ─── Circuit Breaker ────────────────────────────────────────────────────────
 
@@ -64,7 +57,94 @@ class CircuitBreaker {
   }
 }
 
+// ─── Multi-Account Provider ─────────────────────────────────────────────────
+
+class MultiAccountProvider {
+  constructor(name, accounts) {
+    this.name = name;
+    this.accounts = accounts.map((p, i) => ({
+      provider: p,
+      circuitBreaker: new CircuitBreaker(),
+      id: String(i),
+    }));
+    this.currentIndex = 0;
+  }
+
+  nextHealthy(exclude = new Set()) {
+    const total = this.accounts.length;
+    for (let i = 0; i < total; i++) {
+      const idx = (this.currentIndex + i) % total;
+      if (exclude.has(idx)) continue;
+      const entry = this.accounts[idx];
+      if (!entry.circuitBreaker.isOpen()) {
+        this.currentIndex = (idx + 1) % total;
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  async createSandbox(req) {
+    const tried = new Set();
+    const total = this.accounts.length;
+    let lastError = null;
+
+    while (tried.size < total) {
+      const entry = this.nextHealthy(tried);
+      if (!entry) break;
+      const idx = this.accounts.indexOf(entry);
+      tried.add(idx);
+
+      try {
+        const instance = await entry.provider.createSandbox(req);
+        entry.circuitBreaker.recordSuccess();
+        return { ...instance, provider: `${this.name}[${entry.id}]` };
+      } catch (e) {
+        entry.circuitBreaker.recordFailure();
+        lastError = e;
+      }
+    }
+    throw new Error(`All ${total} accounts of ${this.name} failed: ${lastError?.message}`);
+  }
+
+  async executeCommand(sandboxId, command, timeout) {
+    for (const entry of this.accounts) {
+      try {
+        const result = await entry.provider.executeCommand(sandboxId, command, timeout);
+        entry.circuitBreaker.recordSuccess();
+        return result;
+      } catch { continue; }
+    }
+    throw new Error(`Execute failed on all accounts of ${this.name}`);
+  }
+
+  async destroySandbox(sandboxId) {
+    for (const entry of this.accounts) {
+      try {
+        const ok = await entry.provider.destroySandbox(sandboxId);
+        if (ok) return true;
+      } catch { continue; }
+    }
+    return false;
+  }
+
+  async listSandboxes() {
+    const all = [];
+    for (const entry of this.accounts) {
+      try {
+        const list = await entry.provider.listSandboxes();
+        all.push(...list);
+      } catch { continue; }
+    }
+    return all;
+  }
+}
+
 // ─── Providers ──────────────────────────────────────────────────────────────
+
+function splitKeys(raw) {
+  return raw.split(",").map(k => k.trim()).filter(Boolean);
+}
 
 class E2BProvider {
   name = "e2b";
@@ -255,23 +335,54 @@ class SandboxRouter {
   }
 
   getHealthStatus() {
-    return Array.from(this.providers.entries()).map(([name]) => {
+    return Array.from(this.providers.entries()).map(([name, p]) => {
       const cb = this.circuitBreakers.get(name);
-      return { name, healthy: !cb.isOpen(), circuit_state: cb.state, failure_count: cb.failureCount };
+      const isMulti = p instanceof MultiAccountProvider;
+      return {
+        name,
+        healthy: !cb.isOpen(),
+        circuit_state: cb.state,
+        failure_count: cb.failureCount,
+        accounts: isMulti ? p.accounts.length : 1,
+      };
     });
   }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Factory ────────────────────────────────────────────────────────────────
 
 function createRouter(env) {
   const router = new SandboxRouter();
-  if (env.E2B_API_KEY) router.registerProvider("e2b", new E2BProvider(env.E2B_API_KEY));
-  if (env.DAYTONA_API_KEY) router.registerProvider("daytona", new DaytonaProvider(env.DAYTONA_API_KEY, env.DAYTONA_API_URL));
-  if (env.MODAL_TOKEN_ID) router.registerProvider("modal", new ModalProvider(env.MODAL_TOKEN_ID));
+
+  if (env.E2B_API_KEY) {
+    const keys = splitKeys(env.E2B_API_KEY);
+    const provider = keys.length > 1
+      ? new MultiAccountProvider("e2b", keys.map(k => new E2BProvider(k)))
+      : new E2BProvider(keys[0]);
+    router.registerProvider("e2b", provider);
+  }
+
+  if (env.DAYTONA_API_KEY) {
+    const keys = splitKeys(env.DAYTONA_API_KEY);
+    const provider = keys.length > 1
+      ? new MultiAccountProvider("daytona", keys.map(k => new DaytonaProvider(k, env.DAYTONA_API_URL)))
+      : new DaytonaProvider(keys[0], env.DAYTONA_API_URL);
+    router.registerProvider("daytona", provider);
+  }
+
+  if (env.MODAL_TOKEN_ID) {
+    const keys = splitKeys(env.MODAL_TOKEN_ID);
+    const provider = keys.length > 1
+      ? new MultiAccountProvider("modal", keys.map(k => new ModalProvider(k)))
+      : new ModalProvider(keys[0]);
+    router.registerProvider("modal", provider);
+  }
+
   if (env.DEFAULT_PROVIDER) router.defaultProvider = env.DEFAULT_PROVIDER;
   return router;
 }
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function checkAuth(request, env) {
   if (!env.API_TOKEN) return true;
