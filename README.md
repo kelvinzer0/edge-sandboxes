@@ -4,9 +4,9 @@
 
 Deploy once to Cloudflare Workers or EdgeOne, manage all sandbox providers from one place.
 
-[![Deploy to Cloudflare](https:// deploy.workers.cloudflare.com/button.svg)](https://dash.cloudflare.com/?url=https://github.com/kelvinzer0/edge-sandboxes)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://dash.cloudflare.com/?to=/:account/workers-and-pages/create/pages)
 
-[![Deploy to EdgeOne](https://raw.githubusercontent.com/nicedoc/images/master/deploy-to-edgeone-button.svg)](https://console.cloud.tencent.com/edgeone/pages/new?gitRepo=https://github.com/kelvinzer0/edge-sandboxes)
+[![Deploy to EdgeOne Pages](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2Fkelvinzer0%2Fedge-sandboxes)
 
 ## Why?
 
