@@ -253,49 +253,58 @@ class E2BProvider {
   }
 }
 
+const DAYTONA_API_BASE = "https://app.daytona.io/api";
+
 class DaytonaProvider {
   name = "daytona";
-  constructor(apiKey, baseUrl) {
+  constructor(apiKey) {
     this.apiKey = apiKey;
-    this.baseUrl = baseUrl || "https://app.daytona.io/api";
+    this.sandboxes = new Map();
+  }
+
+  headers() {
+    return { "Authorization": `Bearer ${this.apiKey}`, "Content-Type": "application/json" };
   }
 
   async createSandbox(req) {
-    const resp = await fetch(`${this.baseUrl}/sandboxes`, {
+    const resp = await fetch(`${DAYTONA_API_BASE}/sandbox`, {
       method: "POST",
-      headers: { "Authorization": `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ image: req.image || "daytonaio/ai-test:0.2.3", envVars: req.env_vars || {}, labels: req.labels || {} }),
+      headers: this.headers(),
+      body: JSON.stringify({ snapshot: req.image || "daytonaio/sandbox:latest", env: req.env_vars || {}, labels: req.labels || {}, target: "default" }),
     });
-    if (!resp.ok) throw new Error(`Daytona create failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`Daytona create failed: ${resp.status} ${await resp.text()}`);
     const data = await resp.json();
+    this.sandboxes.set(data.id, { toolboxUrl: data.toolboxProxyUrl || "" });
     return { id: data.id, provider: this.name, state: "running", labels: req.labels };
   }
 
   async executeCommand(sandboxId, command, timeout) {
     const start = Date.now();
-    const resp = await fetch(`${this.baseUrl}/sandboxes/${sandboxId}/exec`, {
+    const meta = this.sandboxes.get(sandboxId);
+    if (!meta?.toolboxUrl) throw new Error(`Daytona sandbox ${sandboxId} not found`);
+
+    const resp = await fetch(`${meta.toolboxUrl}/process/execute`, {
       method: "POST",
-      headers: { "Authorization": `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
+      headers: this.headers(),
       body: JSON.stringify({ command }),
     });
-    if (!resp.ok) throw new Error(`Daytona exec failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`Daytona exec failed: ${resp.status} ${await resp.text()}`);
     const data = await resp.json();
-    return { exit_code: data.exitCode ?? 0, stdout: data.stdout ?? "", stderr: data.stderr ?? "", duration_ms: Date.now() - start };
+    return { exit_code: data.exitCode ?? 0, stdout: data.result ?? "", stderr: data.error ?? "", duration_ms: Date.now() - start };
   }
 
   async destroySandbox(sandboxId) {
-    const resp = await fetch(`${this.baseUrl}/sandboxes/${sandboxId}`, {
-      method: "DELETE", headers: { "Authorization": `Bearer ${this.apiKey}` },
-    });
+    const resp = await fetch(`${DAYTONA_API_BASE}/sandbox/${sandboxId}`, { method: "DELETE", headers: this.headers() });
+    this.sandboxes.delete(sandboxId);
     return resp.ok;
   }
 
   async listSandboxes() {
-    const resp = await fetch(`${this.baseUrl}/sandboxes`, { headers: { "Authorization": `Bearer ${this.apiKey}` } });
+    const resp = await fetch(`${DAYTONA_API_BASE}/sandbox`, { headers: this.headers() });
     if (!resp.ok) return [];
     const data = await resp.json();
     const items = Array.isArray(data) ? data : data.items || [];
-    return items.map(s => ({ id: s.id, provider: this.name, state: "running", labels: s.labels || {} }));
+    return items.map(s => ({ id: s.id, provider: this.name, state: s.state || "running", labels: s.labels || {} }));
   }
 }
 
