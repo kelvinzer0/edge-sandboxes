@@ -57,7 +57,7 @@ export class E2BProvider extends SandboxProvider {
     const token = meta?.accessToken;
 
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      "Content-Type": "application/connect+json",
       "Connect-Protocol-Version": "1",
     };
     if (token) headers["X-Access-Token"] = token;

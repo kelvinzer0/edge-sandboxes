@@ -176,7 +176,7 @@ class E2BProvider {
     const meta = this.sandboxes.get(sandboxId);
     const token = meta?.accessToken;
 
-    const headers = { "Content-Type": "application/json", "Connect-Protocol-Version": "1" };
+    const headers = { "Content-Type": "application/connect+json", "Connect-Protocol-Version": "1" };
     if (token) headers["X-Access-Token"] = token;
 
     const resp = await fetch(`https://49983-${sandboxId}.e2b.app/process.Process/Start`, {
