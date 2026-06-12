@@ -69,16 +69,27 @@ npx wrangler deploy
 
 ### EdgeOne
 
+```
+edge-sandboxes/
+├── edge-functions/           # EdgeOne auto-detects this
+│   └── api/sandbox/[[default]].js
+├── edge-worker/              # Source code (for reference)
+└── README.md
+```
+
 ```bash
-# 1. Create a Pages project on EdgeOne console
+# 1. Create Pages project on EdgeOne console
 #    → https://console.cloud.tencent.com/edgeone/pages
 
-# 2. Copy edge-worker/src/core.ts + edge-worker/src/edgeone.ts to:
-#    /edge-functions/api/sandbox/[[default]].js
+# 2. Connect your GitHub repo
 
-# 3. Set env vars in EdgeOne dashboard
+# 3. EdgeOne auto-detects edge-functions/api/sandbox/[[default]].js
 
-# 4. Deploy via EdgeOne CLI or dashboard
+# 4. Set env vars in EdgeOne dashboard:
+#    E2B_API_KEY=your-key
+#    DEFAULT_PROVIDER=e2b
+
+# 5. Deploy automatically on push
 ```
 
 ## API
