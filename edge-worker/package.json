@@ -8,10 +8,12 @@
     "deploy": "wrangler deploy",
     "deploy:edgeone": "echo 'See README.md for EdgeOne deployment instructions'"
   },
+  "dependencies": {
+    "@cloudflare/sandbox": "latest"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.0.0",
     "typescript": "^5.0.0",
     "wrangler": "^3.0.0"
   }
-}
 }

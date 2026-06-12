@@ -1,3 +1,12 @@
+/**
+ * Cloudflare Worker entry — edge-sandboxes
+ *
+ * When deployed to Cloudflare:
+ * - @cloudflare/sandbox is auto-detected (Sandbox Durable Object binding)
+ * - Additional providers via env URLs (EDGEONE_WORKER_URL, etc.)
+ * - Auto fallback if default fails
+ */
+
 import type { Env } from "./types";
 import { handleRequest } from "./handlers";
 

@@ -1,5 +1,21 @@
 name = "edge-sandboxes"
+main = "edge-worker/src/cf.ts"
 compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
 
 [vars]
-DEFAULT_PROVIDER = "edgeone"
+DEFAULT_PROVIDER = "cloudflare"
+
+[[containers]]
+class_name = "Sandbox"
+image = "python:3.12-slim"
+instance_type = "lite"
+max_instances = 10
+
+[[durable_objects.bindings]]
+class_name = "Sandbox"
+name = "Sandbox"
+
+[[migrations]]
+new_sqlite_classes = ["Sandbox"]
+tag = "v1"
