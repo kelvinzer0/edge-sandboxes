@@ -57,7 +57,7 @@ export class E2BProvider extends SandboxProvider {
     const token = meta?.accessToken;
 
     const headers: Record<string, string> = {
-      "Content-Type": "application/connect+json",
+      "Content-Type": "application/json",
       "Connect-Protocol-Version": "1",
     };
     if (token) headers["X-Access-Token"] = token;
@@ -77,25 +77,43 @@ export class E2BProvider extends SandboxProvider {
 
     if (!resp.ok) throw new Error(`E2B exec failed: ${resp.status}`);
 
-    const data = await resp.json() as any;
-    const event = data.event;
+    const text = await resp.text();
 
-    if (event?.end) {
-      const status = event.end.status || "";
-      const exitMatch = status.match(/exit status (\d+)/);
-      const exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
-      return {
-        exit_code: exitCode,
-        stdout: "",
-        stderr: event.end.error || "",
-        duration_ms: Date.now() - start,
-      };
+    // Connect protocol streaming: messages separated by \r\n
+    const messages = text.split(/\r\n/).filter(Boolean);
+
+    let exitCode = 0;
+    let stdout = "";
+    let stderr = "";
+    let error = "";
+
+    for (const msg of messages) {
+      try {
+        const parsed = JSON.parse(msg);
+        const event = parsed.event;
+        if (!event) continue;
+
+        if (event.start) {
+          // Process started
+        } else if (event.data) {
+          if (event.data.stdout) stdout += atob(event.data.stdout);
+          if (event.data.stderr) stderr += atob(event.data.stderr);
+          if (event.data.pty) stdout += atob(event.data.pty);
+        } else if (event.end) {
+          const status = event.end.status || "";
+          const exitMatch = status.match(/exit status (\d+)/);
+          exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
+          error = event.end.error || "";
+        }
+      } catch {
+        // Skip non-JSON messages
+      }
     }
 
     return {
-      exit_code: 0,
-      stdout: "",
-      stderr: "",
+      exit_code: exitCode,
+      stdout,
+      stderr: stderr || error,
       duration_ms: Date.now() - start,
     };
   }

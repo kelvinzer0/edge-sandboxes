@@ -176,7 +176,7 @@ class E2BProvider {
     const meta = this.sandboxes.get(sandboxId);
     const token = meta?.accessToken;
 
-    const headers = { "Content-Type": "application/connect+json", "Connect-Protocol-Version": "1" };
+    const headers = { "Content-Type": "application/json", "Connect-Protocol-Version": "1" };
     if (token) headers["X-Access-Token"] = token;
 
     const resp = await fetch(`https://49983-${sandboxId}.e2b.app/process.Process/Start`, {
@@ -186,14 +186,29 @@ class E2BProvider {
     });
     if (!resp.ok) throw new Error(`E2B exec failed: ${resp.status}`);
 
-    const data = await resp.json();
-    const event = data.event;
-    if (event?.end) {
-      const status = event.end.status || "";
-      const exitMatch = status.match(/exit status (\d+)/);
-      return { exit_code: exitMatch ? parseInt(exitMatch[1]) : 0, stdout: "", stderr: event.end.error || "", duration_ms: Date.now() - start };
+    const text = await resp.text();
+    const messages = text.split(/\r\n/).filter(Boolean);
+
+    let exitCode = 0, stdout = "", stderr = "", error = "";
+
+    for (const msg of messages) {
+      try {
+        const parsed = JSON.parse(msg);
+        const event = parsed.event;
+        if (!event) continue;
+        if (event.data) {
+          if (event.data.stdout) stdout += atob(event.data.stdout);
+          if (event.data.stderr) stderr += atob(event.data.stderr);
+          if (event.data.pty) stdout += atob(event.data.pty);
+        } else if (event.end) {
+          const status = event.end.status || "";
+          const exitMatch = status.match(/exit status (\d+)/);
+          exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
+          error = event.end.error || "";
+        }
+      } catch {}
     }
-    return { exit_code: 0, stdout: "", stderr: "", duration_ms: Date.now() - start };
+    return { exit_code: exitCode, stdout, stderr: stderr || error, duration_ms: Date.now() - start };
   }
 
   async destroySandbox(sandboxId) {
