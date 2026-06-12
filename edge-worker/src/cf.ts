@@ -1,10 +1,5 @@
-/**
- * Cloudflare Worker adapter.
- *
- * Deploy: npx wrangler deploy
- */
-
-import { Env, handleRequest } from "./core";
+import type { Env } from "./types";
+import { handleRequest } from "./handlers";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

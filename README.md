@@ -28,27 +28,28 @@ Most sandbox libraries are **provider-specific**. You need a different SDK for E
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│               Your Application                      │
-│                                                     │
-│   curl / fetch / any HTTP client                    │
-└──────────────────────┬──────────────────────────────┘
-                       │ HTTP
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│            Edge Worker (CF / EdgeOne)               │
-│                                                     │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐             │
-│  │ Circuit │  │ Fallback│  │ Health  │             │
-│  │ Breaker │  │  Chain  │  │  Check  │             │
-│  └────┬────┘  └────┬────┘  └────┬────┘             │
-│       └────────────┼────────────┘                   │
-│                    ▼                                │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐       │
-│  │  E2B   │ │Daytona │ │ Modal  │ │CloudFl │       │
-│  └────────┘ └────────┘ └────────┘ └────────┘       │
-└─────────────────────────────────────────────────────┘
+edge-worker/src/
+├── types.ts              # All interfaces (Env, SandboxRequest, etc.)
+├── circuit-breaker.ts    # Circuit breaker implementation
+├── router.ts             # Fallback chain + provider routing
+├── handlers.ts           # HTTP request handlers
+├── providers/
+│   ├── base.ts           # Abstract SandboxProvider
+│   ├── e2b.ts            # E2B provider
+│   ├── daytona.ts        # Daytona provider
+│   ├── modal.ts          # Modal provider
+│   ├── cloudflare.ts     # Cloudflare Sandbox provider
+│   ├── edgeone.ts        # EdgeOne provider
+│   └── index.ts          # Provider registry
+├── core.ts               # Barrel export
+├── cf.ts                 # Cloudflare Worker entry
+└── edgeone.ts            # EdgeOne entry
 ```
+
+**Adding a new provider:**
+1. Create `src/providers/myprovider.ts`
+2. Extend `SandboxProvider`
+3. Register in `src/providers/index.ts`
 
 ## Quick Start
 
