@@ -1,0 +1,32 @@
+{
+  "name": "edge-sandboxes",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "pages_build_output_dir": "./functions",
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "Sandbox",
+        "class_name": "Sandbox"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox"]
+    }
+  ],
+
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "python:3.12-slim",
+      "instance_type": "lite",
+      "max_instances": 10
+    }
+  ]
+}
