@@ -270,7 +270,7 @@ class DaytonaProvider {
     const resp = await fetch(`${DAYTONA_API_BASE}/sandbox`, {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify({ snapshot: req.image || "daytonaio/sandbox:latest", env: req.env_vars || {}, labels: req.labels || {}, target: "default" }),
+      body: JSON.stringify({ snapshot: req.image || "daytonaio/sandbox:latest", env: req.env_vars || {}, labels: req.labels || {} }),
     });
     if (!resp.ok) throw new Error(`Daytona create failed: ${resp.status} ${await resp.text()}`);
     const data = await resp.json();

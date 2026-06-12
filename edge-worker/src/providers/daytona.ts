@@ -28,7 +28,6 @@ export class DaytonaProvider extends SandboxProvider {
         snapshot: req.image || "daytonaio/sandbox:latest",
         env: req.env_vars || {},
         labels: req.labels || {},
-        target: "default",
       }),
     });
     if (!resp.ok) throw new Error(`Daytona create failed: ${resp.status} ${await resp.text()}`);
