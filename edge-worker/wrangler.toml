@@ -10,6 +10,12 @@ compatibility_flags = ["nodejs_compat_v2"]
 # Set secrets via: npx wrangler secret put DAYTONA_API_KEY
 # Set secrets via: npx wrangler secret put EDGEONE_WORKER_URL
 
+[[containers]]
+class_name = "Sandbox"
+image = "./Dockerfile"
+instance_type = "lite"
+max_instances = 10
+
 [[durable_objects.bindings]]
 name = "Sandbox"
 class_name = "Sandbox"
