@@ -240,6 +240,61 @@ async with EdgeSandbox.create(
 
 Circuit breakers track provider health. If a provider fails 5 times, it's marked unhealthy for 60 seconds before retrying.
 
+## Multi-Account Round-Robin
+
+Use multiple API keys per provider with automatic round-robin distribution. Useful for bypassing rate limits and distributing load across accounts.
+
+### Environment Variables (comma-separated)
+
+```bash
+export E2B_API_KEY="key-account-1,key-account-2,key-account-3"
+export DAYTONA_API_KEY="daytona-key-1,daytona-key-2"
+```
+
+Auto-detected on first use — no code changes needed.
+
+### Manual Configuration
+
+```python
+from edge_sandboxes import EdgeSandbox
+
+# List of keys
+EdgeSandbox.configure(
+    e2b_api_key=["key-1", "key-2", "key-3"],
+    default_provider="e2b",
+)
+
+# Or comma-separated string
+EdgeSandbox.configure(
+    e2b_api_key="key-1,key-2,key-3",
+    default_provider="e2b",
+)
+```
+
+### Direct Usage
+
+```python
+from edge_sandboxes import MultiAccountProvider
+from edge_sandboxes.providers.e2b import E2BProvider
+
+provider = MultiAccountProvider(
+    provider_class=E2BProvider,
+    accounts=[
+        {"api_key": "key-1", "account_id": "team-a"},
+        {"api_key": "key-2", "account_id": "team-b"},
+        {"api_key": "key-3", "account_id": "team-c"},
+    ],
+)
+
+# Round-robin: each create_sandbox call picks the next healthy account
+instance = await provider.create_sandbox(config)  # → account-0
+instance = await provider.create_sandbox(config)  # → account-1
+instance = await provider.create_sandbox(config)  # → account-2
+instance = await provider.create_sandbox(config)  # → account-0 (wraps)
+```
+
+Each account has its own circuit breaker — if one account hits rate limits, it's temporarily skipped while others continue.
+
 ## Features
 
 | Feature | Status |
@@ -250,6 +305,7 @@ Circuit breakers track provider health. If a provider fails 5 times, it's marked
 | Fallback chains | ✅ |
 | Circuit breakers | ✅ |
 | Health-aware routing | ✅ |
+| Multi-account round-robin | ✅ |
 | CLI | Planned |
 | Connection pooling | Planned |
 

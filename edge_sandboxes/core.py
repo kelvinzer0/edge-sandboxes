@@ -342,6 +342,9 @@ class EdgeSandbox:
     def _auto_configure(cls) -> None:
         """Auto-register providers from env vars.
 
+        Supports multiple accounts via comma-separated values:
+            E2B_API_KEY=key1,key2,key3  → MultiAccountProvider with round-robin
+
         Priority order:
         1. Daytona  (DAYTONA_API_KEY)
         2. E2B      (E2B_API_KEY)
@@ -350,41 +353,83 @@ class EdgeSandbox:
         5. Modal    (MODAL_TOKEN_ID)
         6. Cloudflare (CLOUDFLARE_SANDBOX_BASE_URL + CLOUDFLARE_API_TOKEN)
         """
+        from .multi_account import MultiAccountProvider
         from .providers import get_provider_class
 
         router = cls._router
         assert router is not None
 
-        registry: list[tuple[str, str, list[str]]] = [
-            ("daytona", "daytona", ["DAYTONA_API_KEY"]),
-            ("e2b", "e2b", ["E2B_API_KEY"]),
-            ("sprites", "sprites", ["SPRITES_TOKEN"]),
-            ("hopx", "hopx", ["HOPX_API_KEY"]),
-            ("modal", "modal", ["MODAL_TOKEN_ID"]),
-            ("cloudflare", "cloudflare", ["CLOUDFLARE_SANDBOX_BASE_URL", "CLOUDFLARE_API_TOKEN"]),
-            ("edgeone", "edgeone", ["EDGEONE_FUNCTION_URL"]),
+        registry: list[tuple[str, str, list[str], str | None]] = [
+            ("daytona", "daytona", ["DAYTONA_API_KEY"], "api_key"),
+            ("e2b", "e2b", ["E2B_API_KEY"], "api_key"),
+            ("sprites", "sprites", ["SPRITES_TOKEN"], "token"),
+            ("hopx", "hopx", ["HOPX_API_KEY"], "api_key"),
+            ("modal", "modal", ["MODAL_TOKEN_ID"], "token_id"),
         ]
 
-        for provider_name, class_key, required_envs in registry:
+        for provider_name, class_key, required_envs, param_name in registry:
             if all(os.getenv(v) for v in required_envs):
                 try:
                     cls_type = get_provider_class(class_key)
                     if cls_type:
-                        router.register_provider(provider_name, cls_type())
+                        raw_value = os.getenv(required_envs[0], "")
+                        if "," in raw_value:
+                            provider = MultiAccountProvider.from_env(
+                                provider_class=cls_type,
+                                env_var=required_envs[0],
+                                param_name=param_name,
+                                name_override=provider_name,
+                            )
+                        else:
+                            provider = cls_type()
+                        router.register_provider(provider_name, provider)
                         logger.info(f"Auto-registered provider: {provider_name}")
                 except Exception as e:
                     logger.debug(f"Failed to register {provider_name}: {e}")
+
+        # Cloudflare — multi-field provider, not single-key
+        if all(os.getenv(v) for v in ["CLOUDFLARE_SANDBOX_BASE_URL", "CLOUDFLARE_API_TOKEN"]):
+            try:
+                cls_type = get_provider_class("cloudflare")
+                if cls_type:
+                    router.register_provider("cloudflare", cls_type())
+                    logger.info("Auto-registered provider: cloudflare")
+            except Exception as e:
+                logger.debug(f"Failed to register cloudflare: {e}")
+
+        # EdgeOne
+        if os.getenv("EDGEONE_FUNCTION_URL"):
+            try:
+                cls_type = get_provider_class("edgeone")
+                if cls_type:
+                    router.register_provider("edgeone", cls_type())
+                    logger.info("Auto-registered provider: edgeone")
+            except Exception as e:
+                logger.debug(f"Failed to register edgeone: {e}")
 
     @classmethod
     def configure(cls, *, default_provider: str | None = None, **provider_configs) -> None:
         """Manually configure providers.
 
-        Example:
+        Supports single key or list of keys for multi-account round-robin.
+
+        Examples:
+            # Single account
+            EdgeSandbox.configure(e2b_api_key="sk-xxx", default_provider="e2b")
+
+            # Multiple accounts — round-robin
             EdgeSandbox.configure(
-                e2b_api_key="...",
+                e2b_api_key=["sk-xxx", "sk-yyy", "sk-zzz"],
+                default_provider="e2b",
+            )
+
+            # Multiple accounts via comma-separated string
+            EdgeSandbox.configure(
+                e2b_api_key="sk-xxx,sk-yyy,sk-zzz",
                 default_provider="e2b",
             )
         """
+        from .multi_account import MultiAccountProvider
         from .providers import get_provider_class
 
         router = cls._ensure_router()
@@ -401,8 +446,28 @@ class EdgeSandbox:
             val = provider_configs.get(config_key)
             if val:
                 cls_type = get_provider_class(prov_name)
-                if cls_type:
-                    router.register_provider(prov_name, cls_type(**{param_name: val}))
+                if not cls_type:
+                    continue
+
+                keys: list[str] = []
+                if isinstance(val, list):
+                    keys = [str(k).strip() for k in val if k]
+                elif isinstance(val, str) and "," in val:
+                    keys = [k.strip() for k in val.split(",") if k.strip()]
+                else:
+                    keys = [str(val)]
+
+                if len(keys) > 1:
+                    accounts = [{param_name: k, "account_id": str(i)} for i, k in enumerate(keys)]
+                    provider = MultiAccountProvider(
+                        provider_class=cls_type,
+                        accounts=accounts,
+                        name_override=prov_name,
+                    )
+                else:
+                    provider = cls_type(**{param_name: keys[0]})
+
+                router.register_provider(prov_name, provider)
 
         cf_cfg = provider_configs.get("cloudflare_config")
         if cf_cfg:

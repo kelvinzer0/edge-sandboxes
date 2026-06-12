@@ -25,6 +25,7 @@ from .exceptions import (
     SandboxNotFoundError,
     SandboxTimeoutError,
 )
+from .multi_account import MultiAccountProvider
 from .resilience import CircuitBreaker, RetryConfig
 
 __all__ = [
@@ -37,6 +38,8 @@ __all__ = [
     "SandboxRouter",
     "SandboxConfig",
     "ExecutionResult",
+    # Multi-account
+    "MultiAccountProvider",
     # Resilience
     "CircuitBreaker",
     "RetryConfig",
