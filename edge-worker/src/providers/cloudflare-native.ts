@@ -2,10 +2,9 @@ import type { ExecutionResult, SandboxInstance, SandboxRequest } from "../types"
 import { SandboxProvider } from "./base";
 
 /**
- * Cloudflare native sandbox provider using @cloudflare/sandbox.
- * Only works when deployed on Cloudflare Workers with Durable Objects.
- *
- * Detects CF runtime via globalThis.Sandbox or env.Sandbox binding.
+ * Cloudflare native sandbox provider.
+ * Uses getSandbox() which is globally available in CF Workers runtime
+ * when Sandbox Durable Object binding is configured.
  */
 export class CloudflareNativeProvider extends SandboxProvider {
   name = "cloudflare";
@@ -16,15 +15,15 @@ export class CloudflareNativeProvider extends SandboxProvider {
     this.env = env;
   }
 
-  private async getSandbox(id: string) {
-    // Dynamic import — only works on Cloudflare Workers runtime
-    const mod = await import("@cloudflare/sandbox" as string);
-    return mod.getSandbox(this.env.Sandbox, id);
+  private getSandbox(id: string) {
+    // getSandbox is globally available in CF Workers with Sandbox binding
+    // No import needed — it's injected by the runtime
+    return (globalThis as any).getSandbox(this.env.Sandbox, id);
   }
 
   async createSandbox(req: SandboxRequest): Promise<SandboxInstance> {
     const id = req.labels?.session || req.labels?.name || `sbx-${Date.now()}`;
-    const sandbox = await this.getSandbox(id);
+    const sandbox = this.getSandbox(id);
 
     if (req.env_vars) {
       for (const [key, val] of Object.entries(req.env_vars)) {
@@ -42,7 +41,7 @@ export class CloudflareNativeProvider extends SandboxProvider {
 
   async executeCommand(sandboxId: string, command: string, timeout?: number): Promise<ExecutionResult> {
     const start = Date.now();
-    const sandbox = await this.getSandbox(sandboxId);
+    const sandbox = this.getSandbox(sandboxId);
 
     try {
       const result = await sandbox.exec(command, {
@@ -66,7 +65,7 @@ export class CloudflareNativeProvider extends SandboxProvider {
 
   async destroySandbox(sandboxId: string): Promise<boolean> {
     try {
-      const sandbox = await this.getSandbox(sandboxId);
+      const sandbox = this.getSandbox(sandboxId);
       await sandbox.destroy();
     } catch {}
     return true;

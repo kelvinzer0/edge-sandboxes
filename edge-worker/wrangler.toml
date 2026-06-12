@@ -1,6 +1,7 @@
 name = "edge-sandboxes"
 main = "src/cf.ts"
 compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
 
 [vars]
 DEFAULT_PROVIDER = "e2b"
@@ -9,4 +10,17 @@ DEFAULT_PROVIDER = "e2b"
 # Set secrets via: npx wrangler secret put E2B_API_KEY
 # Set secrets via: npx wrangler secret put DAYTONA_API_KEY
 # Set secrets via: npx wrangler secret put EDGEONE_WORKER_URL
-# Set secrets via: npx wrangler secret put CLOUDFLARE_WORKER_URL
+
+[[durable_objects.bindings]]
+name = "Sandbox"
+class_name = "Sandbox"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sandbox"]
+
+[[containers]]
+class_name = "Sandbox"
+image = "python:3.12-slim"
+instance_type = "lite"
+max_instances = 10
