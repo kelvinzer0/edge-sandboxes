@@ -1,0 +1,10 @@
+name = "edge-sandboxes"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[vars]
+DEFAULT_PROVIDER = "e2b"
+
+# Set secrets via: npx wrangler secret put API_TOKEN
+# Set secrets via: npx wrangler secret put E2B_API_KEY
+# Set secrets via: npx wrangler secret put DAYTONA_API_KEY
