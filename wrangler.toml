@@ -1,0 +1,5 @@
+name = "edge-sandboxes"
+compatibility_date = "2024-12-01"
+
+[vars]
+DEFAULT_PROVIDER = "edgeone"
