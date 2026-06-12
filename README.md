@@ -73,13 +73,25 @@ EdgeOne deployment uses E2B/Daytona as native providers.
 
 Cloudflare deployment uses `@cloudflare/sandbox` sebagai native provider.
 
-1. Klik tombol **Deploy to Cloudflare** di atas
-2. Set env vars di dashboard:
-   ```
-   E2B_API_KEY=your-key
-   DAYTONA_API_KEY=your-key
-   EDGEONE_WORKER_URL=https://your-edgeone.edgeone.dev
-   ```
+```bash
+cd edge-worker
+npm install
+
+# Login ke Cloudflare
+npx wrangler login
+
+# Set secrets
+npx wrangler secret put E2B_API_KEY
+npx wrangler secret put DAYTONA_API_KEY
+
+# Deploy
+npx wrangler deploy
+```
+
+Set env vars di Cloudflare dashboard (Workers → Settings → Variables):
+```
+EDGEONE_WORKER_URL=https://your-edgeone.edgeone.dev
+```
 
 ## API
 
