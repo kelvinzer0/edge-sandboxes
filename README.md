@@ -56,43 +56,46 @@ edge-worker/src/
 
 ## Quick Start
 
-### Cloudflare Workers
+### Deploy to EdgeOne (Recommended)
 
-```bash
-cd edge-worker
-
-# Set secrets
-npx wrangler secret put API_TOKEN
-npx wrangler secret put E2B_API_KEY
-npx wrangler secret put DAYTONA_API_KEY
-
-# Deploy
-npx wrangler deploy
-```
-
-### EdgeOne
-
-```
-edge-sandboxes/
-├── edge-functions/           # EdgeOne auto-detects this
-│   └── api/sandbox/[[default]].js
-├── edge-worker/              # Source code (for reference)
-└── README.md
-```
+EdgeOne deployment uses E2B/Daytona as native providers. Add more providers via env URLs.
 
 ```bash
 # 1. Create Pages project on EdgeOne console
 #    → https://console.cloud.tencent.com/edgeone/pages
 
-# 2. Connect your GitHub repo
+# 2. Connect GitHub repo kelvinzer0/edge-sandboxes
 
 # 3. EdgeOne auto-detects edge-functions/api/sandbox/[[default]].js
 
 # 4. Set env vars in EdgeOne dashboard:
-#    E2B_API_KEY=your-key
-#    DEFAULT_PROVIDER=e2b
+#    E2B_API_KEY=your-e2b-key
+#    DAYTONA_API_KEY=your-daytona-key
+#    CLOUDFLARE_WORKER_URL=https://your-cf-sandbox.workers.dev
+```
 
-# 5. Deploy automatically on push
+### Deploy to Cloudflare
+
+Cloudflare deployment uses `@cloudflare/sandbox` as native provider. Add more providers via env URLs.
+
+```bash
+cd cf-worker
+
+# Install dependencies
+npm install
+
+# Set secrets
+npx wrangler secret put API_TOKEN
+
+# Deploy
+npx wrangler deploy
+```
+
+Then set env vars in Cloudflare dashboard:
+```
+E2B_API_KEY=your-e2b-key
+DAYTONA_API_KEY=your-daytona-key
+EDGEONE_WORKER_URL=https://your-edgeone.edgeone.dev
 ```
 
 ## API
