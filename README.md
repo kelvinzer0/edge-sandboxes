@@ -4,6 +4,10 @@
 
 Deploy once to Cloudflare Workers or EdgeOne, manage all sandbox providers from one place.
 
+[![Deploy to Cloudflare](https:// deploy.workers.cloudflare.com/button.svg)](https://dash.cloudflare.com/?url=https://github.com/kelvinzer0/edge-sandboxes)
+
+[![Deploy to EdgeOne](https://raw.githubusercontent.com/nicedoc/images/master/deploy-to-edgeone-button.svg)](https://console.cloud.tencent.com/edgeone/pages/new?gitRepo=https://github.com/kelvinzer0/edge-sandboxes)
+
 ## Why?
 
 Most sandbox libraries are **provider-specific**. You need a different SDK for E2B, Daytona, etc. And if one provider goes down, you're stuck.
