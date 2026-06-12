@@ -146,45 +146,68 @@ function splitKeys(raw) {
   return raw.split(",").map(k => k.trim()).filter(Boolean);
 }
 
+const E2B_API_BASE = "https://api.e2b.app";
+
 class E2BProvider {
   name = "e2b";
-  constructor(apiKey) { this.apiKey = apiKey; }
+  constructor(apiKey) {
+    this.apiKey = apiKey;
+    this.sandboxes = new Map();
+  }
+
+  headers() {
+    return { "X-API-Key": this.apiKey, "Content-Type": "application/json" };
+  }
 
   async createSandbox(req) {
-    const resp = await fetch("https://api.e2b.dev/sandboxes", {
+    const resp = await fetch(`${E2B_API_BASE}/sandboxes`, {
       method: "POST",
-      headers: { "Authorization": `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
+      headers: this.headers(),
       body: JSON.stringify({ templateID: req.image || "base", envVars: req.env_vars || {}, timeout: req.timeout || 120 }),
     });
-    if (!resp.ok) throw new Error(`E2B create failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`E2B create failed: ${resp.status} ${await resp.text()}`);
     const data = await resp.json();
+    this.sandboxes.set(data.sandboxID, { accessToken: data.envdAccessToken });
     return { id: data.sandboxID, provider: this.name, state: "running", labels: req.labels };
   }
 
   async executeCommand(sandboxId, command, timeout) {
     const start = Date.now();
-    const resp = await fetch(`https://api.e2b.dev/sandboxes/${sandboxId}/commands`, {
+    const meta = this.sandboxes.get(sandboxId);
+    const token = meta?.accessToken;
+
+    const headers = { "Content-Type": "application/connect+json", "Connect-Protocol-Version": "1" };
+    if (token) headers["X-Access-Token"] = token;
+
+    const resp = await fetch(`https://49983-${sandboxId}.e2b.app/process.Process/Start`, {
       method: "POST",
-      headers: { "Authorization": `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ command, timeout: timeout || 30 }),
+      headers,
+      body: JSON.stringify({ process: { cmd: "bash", args: ["-c", command], envs: {}, cwd: null } }),
     });
     if (!resp.ok) throw new Error(`E2B exec failed: ${resp.status}`);
+
     const data = await resp.json();
-    return { exit_code: data.exitCode ?? 0, stdout: data.stdout ?? "", stderr: data.stderr ?? "", duration_ms: Date.now() - start };
+    const event = data.event;
+    if (event?.end) {
+      const status = event.end.status || "";
+      const exitMatch = status.match(/exit status (\d+)/);
+      return { exit_code: exitMatch ? parseInt(exitMatch[1]) : 0, stdout: "", stderr: event.end.error || "", duration_ms: Date.now() - start };
+    }
+    return { exit_code: 0, stdout: "", stderr: "", duration_ms: Date.now() - start };
   }
 
   async destroySandbox(sandboxId) {
-    const resp = await fetch(`https://api.e2b.dev/sandboxes/${sandboxId}`, {
-      method: "DELETE", headers: { "Authorization": `Bearer ${this.apiKey}` },
-    });
+    const resp = await fetch(`${E2B_API_BASE}/sandboxes/${sandboxId}`, { method: "DELETE", headers: this.headers() });
+    this.sandboxes.delete(sandboxId);
     return resp.ok;
   }
 
   async listSandboxes() {
-    const resp = await fetch("https://api.e2b.dev/sandboxes", { headers: { "Authorization": `Bearer ${this.apiKey}` } });
+    const resp = await fetch(`${E2B_API_BASE}/sandboxes`, { headers: this.headers() });
     if (!resp.ok) return [];
     const data = await resp.json();
-    return data.map(s => ({ id: s.sandboxID, provider: this.name, state: s.state || "running" }));
+    const items = data.sandboxes || data || [];
+    return items.map(s => ({ id: s.sandboxID, provider: this.name, state: s.state || "running" }));
   }
 }
 

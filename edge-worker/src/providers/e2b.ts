@@ -1,22 +1,37 @@
 import type { ExecutionResult, SandboxInstance, SandboxRequest } from "../types";
 import { SandboxProvider } from "./base";
 
+const E2B_API_BASE = "https://api.e2b.app";
+
+interface E2BSandboxResponse {
+  sandboxID: string;
+  templateID: string;
+  clientID: string;
+  envdVersion: string;
+  envdAccessToken?: string | null;
+}
+
 export class E2BProvider extends SandboxProvider {
   name = "e2b";
   private apiKey: string;
+  private sandboxes: Map<string, { accessToken?: string | null }> = new Map();
 
   constructor(apiKey: string) {
     super();
     this.apiKey = apiKey;
   }
 
+  private headers(): Record<string, string> {
+    return {
+      "X-API-Key": this.apiKey,
+      "Content-Type": "application/json",
+    };
+  }
+
   async createSandbox(req: SandboxRequest): Promise<SandboxInstance> {
-    const resp = await fetch("https://api.e2b.dev/sandboxes", {
+    const resp = await fetch(`${E2B_API_BASE}/sandboxes`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: this.headers(),
       body: JSON.stringify({
         templateID: req.image || "base",
         envVars: req.env_vars || {},
@@ -24,45 +39,84 @@ export class E2BProvider extends SandboxProvider {
       }),
     });
     if (!resp.ok) throw new Error(`E2B create failed: ${resp.status} ${await resp.text()}`);
-    const data = (await resp.json()) as any;
-    return { id: data.sandboxID, provider: this.name, state: "running", labels: req.labels };
+    const data = (await resp.json()) as E2BSandboxResponse;
+
+    this.sandboxes.set(data.sandboxID, { accessToken: data.envdAccessToken });
+
+    return {
+      id: data.sandboxID,
+      provider: this.name,
+      state: "running",
+      labels: req.labels,
+    };
   }
 
   async executeCommand(sandboxId: string, command: string, timeout?: number): Promise<ExecutionResult> {
     const start = Date.now();
-    const resp = await fetch(`https://api.e2b.dev/sandboxes/${sandboxId}/commands`, {
+    const meta = this.sandboxes.get(sandboxId);
+    const token = meta?.accessToken;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/connect+json",
+      "Connect-Protocol-Version": "1",
+    };
+    if (token) headers["X-Access-Token"] = token;
+
+    const resp = await fetch(`https://49983-${sandboxId}.e2b.app/process.Process/Start`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ command, timeout: timeout || 30 }),
+      headers,
+      body: JSON.stringify({
+        process: {
+          cmd: "bash",
+          args: ["-c", command],
+          envs: {},
+          cwd: null,
+        },
+      }),
     });
+
     if (!resp.ok) throw new Error(`E2B exec failed: ${resp.status}`);
-    const data = (await resp.json()) as any;
+
+    const data = await resp.json() as any;
+    const event = data.event;
+
+    if (event?.end) {
+      const status = event.end.status || "";
+      const exitMatch = status.match(/exit status (\d+)/);
+      const exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
+      return {
+        exit_code: exitCode,
+        stdout: "",
+        stderr: event.end.error || "",
+        duration_ms: Date.now() - start,
+      };
+    }
+
     return {
-      exit_code: data.exitCode ?? 0,
-      stdout: data.stdout ?? "",
-      stderr: data.stderr ?? "",
+      exit_code: 0,
+      stdout: "",
+      stderr: "",
       duration_ms: Date.now() - start,
     };
   }
 
   async destroySandbox(sandboxId: string): Promise<boolean> {
-    const resp = await fetch(`https://api.e2b.dev/sandboxes/${sandboxId}`, {
+    const resp = await fetch(`${E2B_API_BASE}/sandboxes/${sandboxId}`, {
       method: "DELETE",
-      headers: { "Authorization": `Bearer ${this.apiKey}` },
+      headers: this.headers(),
     });
+    this.sandboxes.delete(sandboxId);
     return resp.ok;
   }
 
   async listSandboxes(): Promise<SandboxInstance[]> {
-    const resp = await fetch("https://api.e2b.dev/sandboxes", {
-      headers: { "Authorization": `Bearer ${this.apiKey}` },
+    const resp = await fetch(`${E2B_API_BASE}/sandboxes`, {
+      headers: this.headers(),
     });
     if (!resp.ok) return [];
-    const data = (await resp.json()) as any[];
-    return data.map((s: any) => ({
+    const data = (await resp.json()) as any;
+    const items = data.sandboxes || data || [];
+    return items.map((s: any) => ({
       id: s.sandboxID,
       provider: this.name,
       state: s.state || "running",
