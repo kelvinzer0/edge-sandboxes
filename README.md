@@ -94,11 +94,28 @@ edge-sandboxes/
 
 ## API
 
+**Base URL:** `https://edge-sandboxes-dpl8r4b932li.edgeone.dev`
+
+### Health Check
+
+```bash
+curl https://edge-sandboxes-dpl8r4b932li.edgeone.dev/api/sandbox/health
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "providers": [
+    {"name": "e2b", "healthy": true, "circuit_state": "closed", "failure_count": 0, "accounts": 3}
+  ]
+}
+```
+
 ### Create Sandbox
 
 ```bash
-curl -X POST https://your-worker.workers.dev/api/sandbox/create \
-  -H "Authorization: Bearer $TOKEN" \
+curl -X POST https://edge-sandboxes-dpl8r4b932li.edgeone.dev/api/sandbox/create \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "e2b",
@@ -114,7 +131,7 @@ Response:
 ```json
 {
   "id": "sbx-abc123",
-  "provider": "e2b",
+  "provider": "e2b[0]",
   "state": "running",
   "_provider": "e2b"
 }
@@ -123,11 +140,10 @@ Response:
 ### Execute Command
 
 ```bash
-curl -X POST https://your-worker.workers.dev/api/sandbox/sbx-abc123/exec \
-  -H "Authorization: Bearer $TOKEN" \
+curl -X POST https://edge-sandboxes-dpl8r4b932li.edgeone.dev/api/sandbox/sbx-abc123/exec \
   -H "Content-Type: application/json" \
   -d '{
-    "command": "python train.py",
+    "command": "python -c \"print(42)\"",
     "provider": "e2b",
     "timeout": 60
   }'
@@ -137,7 +153,7 @@ Response:
 ```json
 {
   "exit_code": 0,
-  "stdout": "Training complete!",
+  "stdout": "42\n",
   "stderr": "",
   "duration_ms": 1234
 }
@@ -146,25 +162,12 @@ Response:
 ### Destroy Sandbox
 
 ```bash
-curl -X DELETE "https://your-worker.workers.dev/api/sandbox/sbx-abc123?provider=e2b" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### Health Check
-
-```bash
-curl https://your-worker.workers.dev/api/health
+curl -X DELETE "https://edge-sandboxes-dpl8r4b932li.edgeone.dev/api/sandbox/sbx-abc123?provider=e2b"
 ```
 
 Response:
 ```json
-{
-  "status": "ok",
-  "providers": [
-    {"name": "e2b", "healthy": true, "circuit_state": "closed", "failure_count": 0},
-    {"name": "daytona", "healthy": true, "circuit_state": "closed", "failure_count": 0}
-  ]
-}
+{"destroyed": true}
 ```
 
 ## Fallback Chains
@@ -185,26 +188,45 @@ Circuit breakers track provider health. If a provider fails 5 times, it's marked
 Use multiple API keys per provider. Set comma-separated values:
 
 ```bash
-# In wrangler.toml or EdgeOne dashboard
+# In EdgeOne dashboard or wrangler.toml
 E2B_API_KEY=key1,key2,key3
-DAYTONA_API_KEY=daytona-key-1,daytona-key-2
+DAYTONA_API_KEY=daytona-key-1,daytona-key2
+MODAL_TOKEN_ID=modal-token-1,modal-token-2
 ```
 
-The worker automatically distributes requests across accounts using round-robin.
+The worker automatically distributes requests across accounts using round-robin. Each account has its own circuit breaker.
 
-## JavaScript/TypeScript Client
+## Usage Examples
+
+### cURL
+
+```bash
+# 1. Health check
+curl https://edge-sandboxes-dpl8r4b932li.edgeone.dev/api/sandbox/health
+
+# 2. Create sandbox with fallback
+curl -X POST https://edge-sandboxes-dpl8r4b932li.edgeone.dev/api/sandbox/create \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"e2b","fallback":["daytona"],"image":"python:3.12"}'
+
+# 3. Execute command
+curl -X POST https://edge-sandboxes-dpl8r4b932li.edgeone.dev/api/sandbox/SANDBOX_ID/exec \
+  -H "Content-Type: application/json" \
+  -d '{"command":"echo hello","provider":"e2b"}'
+
+# 4. Destroy sandbox
+curl -X DELETE "https://edge-sandboxes-dpl8r4b932li.edgeone.dev/api/sandbox/SANDBOX_ID?provider=e2b"
+```
+
+### JavaScript/TypeScript
 
 ```typescript
-const API = "https://your-worker.workers.dev";
-const TOKEN = "your-api-token";
+const API = "https://edge-sandboxes-dpl8r4b932li.edgeone.dev";
 
-// Create sandbox with fallback
+// Create sandbox
 const sbx = await fetch(`${API}/api/sandbox/create`, {
   method: "POST",
-  headers: {
-    "Authorization": `Bearer ${TOKEN}`,
-    "Content-Type": "application/json",
-  },
+  headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
     provider: "e2b",
     fallback: ["daytona"],
@@ -214,13 +236,10 @@ const sbx = await fetch(`${API}/api/sandbox/create`, {
 
 console.log(`Sandbox ${sbx.id} created via ${sbx._provider}`);
 
-// Execute
+// Execute command
 const result = await fetch(`${API}/api/sandbox/${sbx.id}/exec`, {
   method: "POST",
-  headers: {
-    "Authorization": `Bearer ${TOKEN}`,
-    "Content-Type": "application/json",
-  },
+  headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
     command: "python -c 'print(42)'",
     provider: sbx._provider,
@@ -228,6 +247,87 @@ const result = await fetch(`${API}/api/sandbox/${sbx.id}/exec`, {
 }).then(r => r.json());
 
 console.log(result.stdout); // "42"
+
+// Destroy
+await fetch(`${API}/api/sandbox/${sbx.id}?provider=${sbx._provider}`, {
+  method: "DELETE",
+});
+```
+
+### Python
+
+```python
+import requests
+
+API = "https://edge-sandboxes-dpl8r4b932li.edgeone.dev"
+
+# Create sandbox
+sbx = requests.post(f"{API}/api/sandbox/create", json={
+    "provider": "e2b",
+    "fallback": ["daytona"],
+    "image": "python:3.12-slim",
+}).json()
+
+print(f"Sandbox {sbx['id']} created via {sbx['_provider']}")
+
+# Execute command
+result = requests.post(f"{API}/api/sandbox/{sbx['id']}/exec", json={
+    "command": "python -c 'print(42)'",
+    "provider": sbx["_provider"],
+}).json()
+
+print(result["stdout"])  # "42"
+
+# Destroy sandbox
+requests.delete(f"{API}/api/sandbox/{sbx['id']}?provider={sbx['_provider']}")
+```
+
+### Go
+
+```go
+package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "net/http"
+)
+
+const API = "https://edge-sandboxes-dpl8r4b932li.edgeone.dev"
+
+func main() {
+    // Create sandbox
+    body, _ := json.Marshal(map[string]interface{}{
+        "provider": "e2b",
+        "fallback": []string{"daytona"},
+        "image":    "python:3.12-slim",
+    })
+    resp, _ := http.Post(API+"/api/sandbox/create", "application/json", bytes.NewReader(body))
+
+    var sbx map[string]interface{}
+    json.NewDecoder(resp.Body).Decode(&sbx)
+    fmt.Printf("Sandbox %s created\n", sbx["id"])
+
+    // Execute command
+    execBody, _ := json.Marshal(map[string]interface{}{
+        "command":  "echo hello",
+        "provider": sbx["_provider"],
+    })
+    execResp, _ := http.Post(
+        API+"/api/sandbox/"+sbx["id"].(string)+"/exec",
+        "application/json",
+        bytes.NewReader(execBody),
+    )
+
+    var result map[string]interface{}
+    json.NewDecoder(execResp.Body).Decode(&result)
+    fmt.Println(result["stdout"])
+
+    // Destroy
+    req, _ := http.NewRequest("DELETE", API+"/api/sandbox/"+sbx["id"].(string)+"?provider="+sbx["_provider"].(string), nil)
+    http.DefaultClient.Do(req)
+}
 ```
 
 ## Features
